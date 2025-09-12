@@ -7,8 +7,7 @@ jobs:
   smoke:
     runs-on: [self-hosted, performance, amd, rocm]
     steps:
-      - name: Print runner info
-        run: |
-          echo "Runner name: $RUNNER_NAME"
+      - run: |
+          echo "Runner: $RUNNER_NAME"
           echo "Labels: $RUNNER_OS $RUNNER_ARCH"
           /opt/rocm/bin/rocm-smi || true
