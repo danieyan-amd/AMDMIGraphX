@@ -1,13 +1,40 @@
-name: ROCm Runner Smoke
+name: ROCm Runner – run script on host
 
 on:
   workflow_dispatch:
+    inputs:
+      script:
+        description: "Path to script in repo (e.g., scripts/hello.py or scripts/hello.sh)"
+        required: true
+        default: "scripts/hello.py"
+      args:
+        description: "Args passed to the script"
+        required: false
+        default: ""
 
 jobs:
-  smoke:
+  run:
     runs-on: [self-hosted, performance, amd, rocm]
     steps:
-      - run: |
+      - uses: actions/checkout@v4
+
+      - name: Where am I?
+        run: |
           echo "Runner: $RUNNER_NAME"
-          echo "Labels: $RUNNER_OS $RUNNER_ARCH"
+          echo "Host: $(hostname)"
           /opt/rocm/bin/rocm-smi || true
+
+      - name: Make script executable (if bash)
+        run: |
+          if [[ "${{ inputs.script }}" == *.sh ]]; then chmod +x "${{ inputs.script }}"; fi
+
+      - name: Run script
+        env:
+          ROCR_VISIBLE_DEVICES: "0"   # pick a GPU index as needed
+        run: |
+          set -e
+          if [[ "${{ inputs.script }}" == *.py ]]; then
+            python3 "${{ inputs.script }}" ${{ inputs.args }}
+          else
+            bash "${{ inputs.script }}" ${{ inputs.args }}
+          fi
