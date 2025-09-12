@@ -1,9 +1,5 @@
 import os, pathlib, datetime, subprocess
 
-mkdir -p scripts
-cat > scripts/hello.py <<'PY'
-import os, pathlib, datetime, subprocess
-
 print("Hello from", os.uname().nodename)
 subprocess.run(["/opt/rocm/bin/rocm-smi"], check=False)
 
