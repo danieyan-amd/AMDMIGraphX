@@ -4,14 +4,18 @@ jobs:
   run:
     runs-on: [self-hosted, performance, amd, rocm]
     steps:
+      # 1) CHECKOUT THE REPO (required so files exist)
       - uses: actions/checkout@v4
 
+      # 2) Show where we are + list files to verify paths
       - name: Show path & files
         run: |
           echo "PWD=$(pwd)"
+          git rev-parse --abbrev-ref HEAD || true
           ls -la
           ls -la scripts || true
 
+      # 3) (Optional) create a tiny script if it's missing
       - name: Create hello.py if missing
         run: |
           mkdir -p scripts
@@ -26,11 +30,13 @@ print("Wrote results/hello.txt")
 PY
           fi
 
+      # 4) Run the script
       - name: Run script
         env:
           ROCR_VISIBLE_DEVICES: "0"
         run: python3 scripts/hello.py
 
+      # 5) Grab any outputs
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
