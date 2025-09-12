@@ -1,50 +1,40 @@
 name: ROCm Runner – run script on host
-
-on:
-  workflow_dispatch:
-    inputs:
-      script:
-        description: "Path to script in repo (e.g., scripts/hello.py or scripts/hello.sh)"
-        required: true
-        default: "scripts/hello.py"
-      args:
-        description: "Args passed to the script"
-        required: false
-        default: ""
-
+on: workflow_dispatch
 jobs:
   run:
     runs-on: [self-hosted, performance, amd, rocm]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Where am I?
+      - name: Show path & files
         run: |
-          echo "Runner: $RUNNER_NAME"
-          echo "Host: $(hostname)"
-          /opt/rocm/bin/rocm-smi || true
+          echo "PWD=$(pwd)"
+          ls -la
+          ls -la scripts || true
 
-      - name: Make script executable (if bash)
+      - name: Create hello.py if missing
         run: |
-          if [[ "${{ inputs.script }}" == *.sh ]]; then chmod +x "${{ inputs.script }}"; fi
+          mkdir -p scripts
+          if [ ! -f scripts/hello.py ]; then
+            cat > scripts/hello.py <<'PY'
+import os, pathlib, datetime, subprocess
+print("Hello from", os.uname().nodename)
+subprocess.run(["/opt/rocm/bin/rocm-smi"], check=False)
+pathlib.Path("results").mkdir(exist_ok=True)
+open("results/hello.txt","w").write(f"ran: {datetime.datetime.utcnow().isoformat()}Z\n")
+print("Wrote results/hello.txt")
+PY
+          fi
 
       - name: Run script
         env:
-          ROCR_VISIBLE_DEVICES: "0"   # change GPU index if needed
-        run: |
-          set -e
-          if [[ "${{ inputs.script }}" == *.py ]]; then
-            python3 "${{ inputs.script }}" ${{ inputs.args }}
-          else
-            bash "${{ inputs.script }}" ${{ inputs.args }}
-          fi
+          ROCR_VISIBLE_DEVICES: "0"
+        run: python3 scripts/hello.py
 
-      - name: Upload results (optional)
+      - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: results
-          path: |
-            results/**
-            **/*.log
+          path: results/**
           if-no-files-found: ignore
