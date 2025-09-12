@@ -1,11 +1,9 @@
 name: ROCm Runner Smoke
-
 on:
   workflow_dispatch:
-
 jobs:
   smoke:
-    runs-on: [self-hosted, performance, amd, rocm]
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/hello.py
