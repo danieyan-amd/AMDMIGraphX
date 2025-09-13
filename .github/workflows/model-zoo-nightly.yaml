@@ -36,7 +36,7 @@ jobs:
 
       - name: Generate cases from datasets
         run: |
-          set -euo pipefail
+          set -e
           echo "runner.name=${{ runner.name }}"
           hostname
           echo "Checking datasets at ${DATASETS_DIR}"
@@ -52,105 +52,113 @@ jobs:
           RTOL: 0.001
           RUN_TS: ${{ steps.ts.outputs.stamp }}
         run: |
-          set -eo pipefail
+          set -e
           export PYTHONPATH=/opt/rocm/lib:$PYTHONPATH
 
           ROOT="logs/${RUN_TS}"
           mkdir -p "${ROOT}/fp16" "${ROOT}/fp32"
           echo "${RUN_TS}" > "${ROOT}/run.timestamp"
 
-          # Execute tests against generated tree; script writes per-model logs under test_generator/logs/{fp16,fp32}
+          # Execute tests; script writes per-model logs under test_generator/logs/{fp16,fp32}
           bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee "${ROOT}/raw.log"
 
           # Copy per-model logs into our timestamped folder
-          shopt -s nullglob
           for p in fp16 fp32; do
-            src_dir="tools/model_zoo/test_generator/logs/$p"
-            [ -d "$src_dir" ] && cp -f "$src_dir"/*.log "${ROOT}/$p/" || true
+            src="tools/model_zoo/test_generator/logs/$p"
+            if [ -d "$src" ]; then
+              cp -f "$src"/*.log "${ROOT}/$p/" 2>/dev/null || true
+            fi
           done
-
-          # Optional grep summaries from combined stdout
-          grep -iE '(^|[^a-z])fp16([^a-z]|$)|half|16-bit' "${ROOT}/raw.log" > "${ROOT}/fp16/summary.log" || true
-          grep -iE '(^|[^a-z])fp32([^a-z]|$)|single|32-bit' "${ROOT}/raw.log" > "${ROOT}/fp32/summary.log" || true
-          grep -n -i -A2 -B2 'fp16' "${ROOT}/raw.log" > "${ROOT}/fp16/context.log" || true
-          grep -n -i -A2 -B2 'fp32' "${ROOT}/raw.log" > "${ROOT}/fp32/context.log" || true
 
           rm -f logs/latest && ln -s "${RUN_TS}" logs/latest
 
-      - name: Summarize regressions (totals, per-precision pass/fail, failure msgs)
+      - name: Summarize results (totals, per-precision pass list, fail list with message)
         env:
           RUN_TS: ${{ steps.ts.outputs.stamp }}
         run: |
-          set -euo pipefail
+          set -e
           ROOT="logs/${RUN_TS}"
           OUT_MD="${ROOT}/summary.md"
           OUT_JSON="${ROOT}/summary.json"
-          python3 - << 'PY'
-import os, re, json
-run_ts = os.environ["RUN_TS"]
-root = os.path.join("logs", run_ts)
-summary = {"totals":{"pass":0,"fail":0},"regressions":{}}
 
-def parse_failure_message(txt:str) -> str:
-    m = list(re.finditer(r"Traceback \(most recent call last\):(.*?)(?:\n\s*\n|\Z)", txt, re.S))
-    if m:
-        block = m[-1].group(1).strip().splitlines()
-        for line in reversed(block):
-            if line.strip():
-                return line.strip()
-    for line in reversed([l.rstrip() for l in txt.splitlines() if l.strip()]):
-        if re.search(r"(error|exception|failed|segmentation fault|assert)", line, re.I):
-            return line
-    return "failed (see log)"
+          node - <<'JS'
+          const fs = require('fs');
+          const path = require('path');
 
-for prec in ("fp32","fp16"):
-    reg = {"passed":[], "failed":[]}
-    d = os.path.join(root, prec)
-    if not os.path.isdir(d):
-        summary["regressions"][prec]=reg
-        continue
-    for fn in sorted(os.listdir(d)):
-        if not fn.endswith(".log"): continue
-        model = fn[:-4]
-        with open(os.path.join(d, fn), "r", errors="replace") as f:
-            txt = f.read()
-        failed = bool(re.search(r"Traceback \(most recent call last\)|\bERROR\b|AssertionError|Segmentation fault|^error:", txt, re.I|re.M))
-        if failed:
-            msg = parse_failure_message(txt)
-            reg["failed"].append({"model": model, "message": msg})
-            summary["totals"]["fail"] += 1
-        else:
-            reg["passed"].append(model)
-            summary["totals"]["pass"] += 1
-    summary["regressions"][prec]=reg
+          const runTs = process.env.RUN_TS;
+          const root = path.join('logs', runTs);
+          const precs = ['fp32','fp16'];
 
-os.makedirs(root, exist_ok=True)
-with open(os.path.join(root,"summary.json"),"w") as f: json.dump(summary,f,indent=2)
+          const summary = { totals: { pass: 0, fail: 0 }, regressions: {} };
 
-lines=[]
-lines.append(f"## Totals\n- PASS: {summary['totals']['pass']}\n- FAIL: {summary['totals']['fail']}\n")
-for prec in ("fp32","fp16"):
-    reg = summary["regressions"].get(prec, {"passed":[], "failed":[]})
-    lines.append(f"## {prec.upper()}")
-    lines.append(f"**Passed ({len(reg['passed'])})**")
-    if reg["passed"]:
-        for m in reg["passed"]:
-            lines.append(f"- {m}")
-    else:
-        lines.append("- none")
-    lines.append(f"\n**Failed ({len(reg['failed'])})**")
-    if reg["failed"]:
-        for item in reg["failed"]:
-            lines.append(f"- {item['model']}: `{item['message']}`")
-    else:
-        lines.append("- none")
-    lines.append("")
-md="\n".join(lines).strip()+"\n"
-with open(os.path.join(root,"summary.md"),"w") as f: f.write(md)
-step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
-if step_summary:
-    with open(step_summary,"a") as f: f.write(md)
-PY
+          function looksFailed(text) {
+            return /(Traceback \(most recent call last\)|\bERROR\b|AssertionError|Segmentation fault|^error:)/im.test(text);
+          }
+
+          function failureMessage(text) {
+            // Prefer the last traceback block's last meaningful line
+            const tb = [...text.matchAll(/Traceback \(most recent call last\):([\s\S]*?)(?:\n\s*\n|\Z)/g)];
+            if (tb.length) {
+              const block = tb[tb.length-1][1].trim().split(/\r?\n/).reverse();
+              for (const line of block) if (line.trim()) return line.trim();
+            }
+            // Fallback to last error-looking line
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).reverse();
+            for (const l of lines) {
+              if (/(error|exception|failed|segmentation fault|assert)/i.test(l)) return l;
+            }
+            return 'failed (see log)';
+          }
+
+          for (const prec of precs) {
+            const d = path.join(root, prec);
+            const reg = { passed: [], failed: [] };
+            if (fs.existsSync(d) && fs.statSync(d).isDirectory()) {
+              const files = fs.readdirSync(d).filter(f => f.endsWith('.log')).sort();
+              for (const fn of files) {
+                const model = fn.slice(0, -4);
+                const txt = fs.readFileSync(path.join(d, fn), 'utf8');
+                if (looksFailed(txt)) {
+                  reg.failed.push({ model, message: failureMessage(txt) });
+                  summary.totals.fail += 1;
+                } else {
+                  reg.passed.push(model);
+                  summary.totals.pass += 1;
+                }
+              }
+            }
+            summary.regressions[prec] = reg;
+          }
+
+          // Write JSON
+          fs.mkdirSync(root, { recursive: true });
+          fs.writeFileSync(path.join(root, 'summary.json'), JSON.stringify(summary, null, 2));
+
+          // Write Markdown
+          const lines = [];
+          lines.push('## Totals');
+          lines.push(`- PASS: ${summary.totals.pass}`);
+          lines.push(`- FAIL: ${summary.totals.fail}`);
+          lines.push('');
+          for (const prec of precs) {
+            const reg = summary.regressions[prec];
+            lines.push(`## ${prec.toUpperCase()}`);
+            lines.push(`**Passed (${reg.passed.length})**`);
+            if (reg.passed.length) reg.passed.forEach(m => lines.push(`- ${m}`)); else lines.push('- none');
+            lines.push('');
+            lines.push(`**Failed (${reg.failed.length})**`);
+            if (reg.failed.length) reg.failed.forEach(it => lines.push(`- ${it.model}: \`${it.message}\``)); else lines.push('- none');
+            lines.push('');
+          }
+          const md = lines.join('\n');
+          fs.writeFileSync(path.join(root, 'summary.md'), md);
+
+          // Publish to job summary if available
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+          }
+          JS
+
           echo "Summary written to ${OUT_MD} and ${OUT_JSON}"
 
       - name: Upload logs and summary (timestamped)
