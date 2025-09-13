@@ -25,6 +25,9 @@ jobs:
         id: ts
         run: echo "stamp=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_OUTPUT"
 
+      - name: Make test_models.sh executable
+        run: chmod +x tools/model_zoo/test_generator/test_models.sh
+
       - name: Run model-zoo tests and capture logs
         env:
           TARGET: gpu
@@ -39,13 +42,13 @@ jobs:
           mkdir -p "${ROOT}/fp16" "${ROOT}/fp32"
           echo "${RUN_TS}" > "${ROOT}/run.timestamp"
 
-          # sanity check the dataset path
+          # sanity check dataset path
           ls -ld /usr/share/migraphx/migraph_datasets
 
-          # run your tester on the system datasets; per-model logs land in logs/${RUN_TS}/{fp16,fp32}
-          bash tools/model_zoo/test_models.sh /usr/share/migraphx/migraph_datasets 2>&1 | tee "${ROOT}/raw.log"
+          # run the actual tester script
+          bash tools/model_zoo/test_generator/test_models.sh /usr/share/migraphx/migraph_datasets 2>&1 | tee "${ROOT}/raw.log"
 
-          # optional summaries from the combined stdout
+          # extract summaries
           grep -iE '(^|[^a-z])fp16([^a-z]|$)|half|16-bit' "${ROOT}/raw.log" > "${ROOT}/fp16/summary.log" || true
           grep -iE '(^|[^a-z])fp32([^a-z]|$)|single|32-bit' "${ROOT}/raw.log" > "${ROOT}/fp32/summary.log" || true
           grep -n -i -A2 -B2 'fp16' "${ROOT}/raw.log" > "${ROOT}/fp16/context.log" || true
