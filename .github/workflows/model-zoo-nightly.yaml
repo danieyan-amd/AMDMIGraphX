@@ -25,4 +25,6 @@ jobs:
           TARGET: gpu
           ATOL: 0.001
           RTOL: 0.001
-        run: node run-model-zoo-tests.js
+        run: |
+          export PYTHONPATH=/opt/rocm/lib:$PYTHONPATH
+          node run-model-zoo-tests.js
