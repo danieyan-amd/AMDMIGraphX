@@ -32,16 +32,17 @@ jobs:
         run: echo "stamp=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Ensure scripts are executable
-        run: chmod +x tools/model_zoo/test_generator/test_models.sh
+        run: |
+          chmod +x tools/model_zoo/test_generator/test_models.sh
+          chmod +x ./run-model-zoo-tests.js
 
-      - name: Generate cases from datasets
+      - name: Generate cases from datasets (repo-root JS)
         run: |
           set -e
           echo "runner.name=${{ runner.name }}"
           hostname
-          echo "Checking datasets at ${DATASETS_DIR}"
           ls -ld "${DATASETS_DIR}"
-          node tools/model_zoo/test_generator/run-model-zoo-tests.js \
+          node ./run-model-zoo-tests.js \
             --datasets "${DATASETS_DIR}" \
             --out tools/model_zoo/onnx_zoo
 
@@ -59,15 +60,14 @@ jobs:
           mkdir -p "${ROOT}/fp16" "${ROOT}/fp32"
           echo "${RUN_TS}" > "${ROOT}/run.timestamp"
 
-          # Execute tests; script writes per-model logs under test_generator/logs/{fp16,fp32}
+          # Executes tests against generated cases; per-model logs land under test_generator/logs/{fp16,fp32}
           bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee "${ROOT}/raw.log"
 
-          # Copy per-model logs into our timestamped folder
+          # Copy per-model logs into our timestamped folder for artifacting and summaries
+          shopt -s nullglob
           for p in fp16 fp32; do
             src="tools/model_zoo/test_generator/logs/$p"
-            if [ -d "$src" ]; then
-              cp -f "$src"/*.log "${ROOT}/$p/" 2>/dev/null || true
-            fi
+            [ -d "$src" ] && cp -f "$src"/*.log "${ROOT}/$p/" || true
           done
 
           rm -f logs/latest && ln -s "${RUN_TS}" logs/latest
@@ -94,19 +94,14 @@ jobs:
           function looksFailed(text) {
             return /(Traceback \(most recent call last\)|\bERROR\b|AssertionError|Segmentation fault|^error:)/im.test(text);
           }
-
           function failureMessage(text) {
-            // Prefer the last traceback block's last meaningful line
             const tb = [...text.matchAll(/Traceback \(most recent call last\):([\s\S]*?)(?:\n\s*\n|\Z)/g)];
             if (tb.length) {
               const block = tb[tb.length-1][1].trim().split(/\r?\n/).reverse();
               for (const line of block) if (line.trim()) return line.trim();
             }
-            // Fallback to last error-looking line
             const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).reverse();
-            for (const l of lines) {
-              if (/(error|exception|failed|segmentation fault|assert)/i.test(l)) return l;
-            }
+            for (const l of lines) if (/(error|exception|failed|segmentation fault|assert)/i.test(l)) return l;
             return 'failed (see log)';
           }
 
@@ -130,11 +125,9 @@ jobs:
             summary.regressions[prec] = reg;
           }
 
-          // Write JSON
           fs.mkdirSync(root, { recursive: true });
           fs.writeFileSync(path.join(root, 'summary.json'), JSON.stringify(summary, null, 2));
 
-          // Write Markdown
           const lines = [];
           lines.push('## Totals');
           lines.push(`- PASS: ${summary.totals.pass}`);
@@ -152,8 +145,6 @@ jobs:
           }
           const md = lines.join('\n');
           fs.writeFileSync(path.join(root, 'summary.md'), md);
-
-          // Publish to job summary if available
           if (process.env.GITHUB_STEP_SUMMARY) {
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
           }
