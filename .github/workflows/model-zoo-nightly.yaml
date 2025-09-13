@@ -12,6 +12,9 @@ jobs:
 
     env:
       DATASETS_DIR: /usr/share/migraphx/migraph_datasets
+      # make migraphx Python binding visible
+      PYTHONPATH: /opt/rocm/lib:${PYTHONPATH}
+      LD_LIBRARY_PATH: /opt/rocm/lib:${LD_LIBRARY_PATH}
 
     steps:
       - uses: actions/checkout@v3
@@ -36,44 +39,6 @@ jobs:
           chmod +x tools/model_zoo/test_generator/test_models.sh
           chmod +x ./run-model-zoo-tests.js
 
-      # --- NEW: ensure MIGraphX Python binding is importable ---
-      - name: Ensure migraphx Python module (system or build local)
-        env:
-          # Include common ROCm lib dirs for both import and dependent .so resolution
-          PYTHONPATH: /opt/rocm/lib:/opt/rocm:/opt/rocm-*/lib:${PYTHONPATH}
-          LD_LIBRARY_PATH: /opt/rocm/lib:/opt/rocm:/opt/rocm-*/lib:${LD_LIBRARY_PATH}
-        run: |
-          set -e
-          echo "Python: $(python3 -V)"
-          echo "Looking for system binding:"
-          ls -l /opt/rocm/lib/migraphx.cpython-*.so 2>/dev/null || true
-          # Try importing as-is
-          if python3 - <<'PY'
-import sys, os
-print("sys.version:", sys.version)
-print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
-import migraphx
-print("migraphx OK from", getattr(migraphx, "__file__", "builtin"))
-PY
-          then
-            echo "Using system migraphx binding"
-          else
-            echo "System binding not found or import failed. Building repo binding..."
-            python3 -m pip install -U pip scikit-build-core pybind11
-            # Build and install from this repo's python binding
-            if [ -d python ]; then
-              pip install ./python
-            else
-              echo "ERROR: repo has no ./python binding dir to install from"; exit 2
-            fi
-            echo "Verifying import after install..."
-            python3 - <<'PY'
-import sys
-import migraphx
-print("migraphx OK after install from repo:", migraphx.__file__)
-PY
-          fi
-
       - name: Generate cases from datasets (repo-root JS)
         run: |
           set -e
@@ -90,20 +55,19 @@ PY
           ATOL: 0.001
           RTOL: 0.001
           RUN_TS: ${{ steps.ts.outputs.stamp }}
-          PYTHONPATH: /opt/rocm/lib:/opt/rocm:/opt/rocm-*/lib:${{ env.PYTHONPATH }}
-          LD_LIBRARY_PATH: /opt/rocm/lib:/opt/rocm:/opt/rocm-*/lib:${{ env.LD_LIBRARY_PATH }}
+          PYTHONPATH: /opt/rocm/lib:${PYTHONPATH}
+          LD_LIBRARY_PATH: /opt/rocm/lib:${LD_LIBRARY_PATH}
         run: |
           set -e
-          export PYTHONPATH LD_LIBRARY_PATH
 
           ROOT="logs/${RUN_TS}"
           mkdir -p "${ROOT}/fp16" "${ROOT}/fp32"
           echo "${RUN_TS}" > "${ROOT}/run.timestamp"
 
-          # Executes tests; per-model logs land under test_generator/logs/{fp16,fp32}
+          echo "Testing models in tools/model_zoo/onnx_zoo"
           bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee "${ROOT}/raw.log"
 
-          # Copy per-model logs into our timestamped folder for artifacting and summaries
+          # Copy per-model logs into our timestamped folder
           shopt -s nullglob
           for p in fp16 fp32; do
             src="tools/model_zoo/test_generator/logs/$p"
@@ -128,7 +92,6 @@ PY
           const runTs = process.env.RUN_TS;
           const root = path.join('logs', runTs);
           const precs = ['fp32','fp16'];
-
           const summary = { totals: { pass: 0, fail: 0 }, regressions: {} };
 
           function looksFailed(text) {
@@ -165,7 +128,6 @@ PY
             summary.regressions[prec] = reg;
           }
 
-          fs.mkdirSync(root, { recursive: true });
           fs.writeFileSync(path.join(root, 'summary.json'), JSON.stringify(summary, null, 2));
 
           const lines = [];
