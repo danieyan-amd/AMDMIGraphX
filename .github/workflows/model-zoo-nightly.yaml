@@ -20,11 +20,41 @@ jobs:
           python-version: '3.10'
       - name: Install test dependencies
         run: pip install -r tools/model_zoo/test_generator/requirements.txt
-      - name: Run model-zoo tests
+
+      - name: Run model-zoo tests and capture log
         env:
           TARGET: gpu
           ATOL: 0.001
           RTOL: 0.001
         run: |
+          set -eo pipefail
           export PYTHONPATH=/opt/rocm/lib:$PYTHONPATH
-          node run-model-zoo-tests.js
+          RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
+          ROOT="logs/${RUN_TS}"
+          mkdir -p "${ROOT}/fp16" "${ROOT}/fp32"
+          echo "${RUN_TS}" > "${ROOT}/run.timestamp"
+
+          # Full combined log
+          node run-model-zoo-tests.js 2>&1 | tee "${ROOT}/raw.log"
+
+          # Extracts (tune patterns to your script’s tags)
+          grep -iE '(^|[^a-z])fp16([^a-z]|$)|half|16-bit' "${ROOT}/raw.log" > "${ROOT}/fp16/summary.log" || true
+          grep -iE '(^|[^a-z])fp32([^a-z]|$)|single|32-bit' "${ROOT}/raw.log" > "${ROOT}/fp32/summary.log" || true
+
+          # Context slices
+          grep -n -i -A2 -B2 'fp16' "${ROOT}/raw.log" > "${ROOT}/fp16/context.log" || true
+          grep -n -i -A2 -B2 'fp32' "${ROOT}/raw.log" > "${ROOT}/fp32/context.log" || true
+
+          # Optional: keep a "latest" symlink for quick SSH access
+          rm -f logs/latest && ln -s "${RUN_TS}" logs/latest
+
+      - name: Upload logs (timestamped)
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-zoo-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: logs/${{ steps.ts.outputs.stamp || '' }}*
+          if-no-files-found: warn
+        env:
+          # Fallback: use glob since ROOT is created above
+          # (artifact step can't read shell variables directly)
+          DUMMY: ignore
