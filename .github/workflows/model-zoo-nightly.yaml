@@ -10,14 +10,20 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 60
 
+    env:
+      DATASETS_DIR: /usr/share/migraphx/migraph_datasets
+
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-node@v3
         with:
           node-version: 20
+
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - name: Install test dependencies
         run: pip install -r tools/model_zoo/test_generator/requirements.txt
 
@@ -25,8 +31,19 @@ jobs:
         id: ts
         run: echo "stamp=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_OUTPUT"
 
-      - name: Make test_models.sh executable
+      - name: Ensure scripts are executable
         run: chmod +x tools/model_zoo/test_generator/test_models.sh
+
+      - name: Generate cases from datasets
+        run: |
+          set -euo pipefail
+          echo "runner.name=${{ runner.name }}"
+          hostname
+          echo "Checking datasets at ${DATASETS_DIR}"
+          ls -ld "${DATASETS_DIR}"
+          node tools/model_zoo/test_generator/run-model-zoo-tests.js \
+            --datasets "${DATASETS_DIR}" \
+            --out tools/model_zoo/onnx_zoo
 
       - name: Run model-zoo tests and capture logs
         env:
@@ -42,13 +59,17 @@ jobs:
           mkdir -p "${ROOT}/fp16" "${ROOT}/fp32"
           echo "${RUN_TS}" > "${ROOT}/run.timestamp"
 
-          # sanity check dataset path
-          ls -ld /usr/share/migraphx/migraph_datasets
+          # Execute tests against generated tree; script writes per-model logs under test_generator/logs/{fp16,fp32}
+          bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee "${ROOT}/raw.log"
 
-          # run the actual tester script
-          bash tools/model_zoo/test_generator/test_models.sh /usr/share/migraphx/migraph_datasets 2>&1 | tee "${ROOT}/raw.log"
+          # Normalize logs into our timestamped folder for artifacts and summary
+          for p in fp16 fp32; do
+            if [ -d tools/model_zoo/test_generator/logs/$p ]; then
+              cp -f tools/model_zoo/test_generator/logs/$p/*.log "${ROOT}/$p/" 2>/dev/null || true
+            fi
+          done
 
-          # extract summaries
+          # Optional quick grep summaries from combined stdout
           grep -iE '(^|[^a-z])fp16([^a-z]|$)|half|16-bit' "${ROOT}/raw.log" > "${ROOT}/fp16/summary.log" || true
           grep -iE '(^|[^a-z])fp32([^a-z]|$)|single|32-bit' "${ROOT}/raw.log" > "${ROOT}/fp32/summary.log" || true
           grep -n -i -A2 -B2 'fp16' "${ROOT}/raw.log" > "${ROOT}/fp16/context.log" || true
@@ -56,9 +77,82 @@ jobs:
 
           rm -f logs/latest && ln -s "${RUN_TS}" logs/latest
 
-      - name: Upload logs (timestamped)
+      - name: Summarize regressions (totals, per-precision pass/fail, failure msgs)
+        env:
+          RUN_TS: ${{ steps.ts.outputs.stamp }}
+        run: |
+          set -euo pipefail
+          ROOT="logs/${RUN_TS}"
+          OUT_MD="${ROOT}/summary.md"
+          OUT_JSON="${ROOT}/summary.json"
+          python3 - << 'PY'
+import os, re, json
+
+run_ts = os.environ["RUN_TS"]
+root = os.path.join("logs", run_ts)
+summary = {"totals":{"pass":0,"fail":0},"regressions":{}}
+
+def parse_failure_message(txt:str) -> str:
+    # Prefer last traceback chunk
+    m = list(re.finditer(r"Traceback \(most recent call last\):(.*?)(?:\n\s*\n|\Z)", txt, re.S))
+    if m:
+        block = m[-1].group(1).strip().splitlines()
+        for line in reversed(block):
+            if line.strip():
+                return line.strip()
+    # Fallback to last line that looks error-ish
+    for line in reversed([l.rstrip() for l in txt.splitlines() if l.strip()]):
+        if re.search(r"(error|exception|failed|segmentation fault|assert)", line, re.I):
+            return line
+    return "failed (see log)"
+
+for prec in ("fp32","fp16"):
+    reg = {"passed":[], "failed":[]}
+    d = os.path.join(root, prec)
+    if not os.path.isdir(d):
+        summary["regressions"][prec]=reg
+        continue
+    for fn in sorted(os.listdir(d)):
+        if not fn.endswith(".log"): continue
+        model = fn[:-4]
+        with open(os.path.join(d, fn), "r", errors="replace") as f:
+            txt = f.read()
+        failed = bool(re.search(r"Traceback \(most recent call last\)|\bERROR\b|AssertionError|Segmentation fault|^error:", txt, re.I|re.M))
+        if failed:
+            msg = parse_failure_message(txt)
+            reg["failed"].append({"model": model, "message": msg})
+            summary["totals"]["fail"] += 1
+        else:
+            reg["passed"].append(model)
+            summary["totals"]["pass"] += 1
+    summary["regressions"][prec]=reg
+
+os.makedirs(root, exist_ok=True)
+with open(os.path.join(root,"summary.json"),"w") as f: json.dump(summary,f,indent=2)
+
+lines=[]
+lines.append(f"## Totals\n- PASS: {summary['totals']['pass']}\n- FAIL: {summary['totals']['fail']}\n")
+for prec in ("fp32","fp16"):
+    reg = summary["regressions"].get(prec, {"passed":[], "failed":[]})
+    lines.append(f"## {prec.upper()}")
+    lines.append(f"**Passed ({len(reg['passed'])})**")
+    lines += [f"- {m}" for m in reg["passed"]] or ["- none"]
+    lines.append(f"\n**Failed ({len(reg['failed'])})**")
+    lines += [f"- {item['model']}: `{item['message']}`" for item in reg["failed"]] or ["- none"]
+    lines.append("")
+md="\n".join(lines).strip()+"\n"
+with open(os.path.join(root,"summary.md"),"w") as f: f.write(md)
+
+step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+if step_summary:
+    with open(step_summary,"a") as f: f.write(md)
+PY
+          echo "Summary written to ${OUT_MD} and ${OUT_JSON}"
+
+      - name: Upload logs and summary (timestamped)
         uses: actions/upload-artifact@v4
         with:
           name: model-zoo-logs-${{ steps.ts.outputs.stamp }}
-          path: logs/${{ steps.ts.outputs.stamp }}
+          path: |
+            logs/${{ steps.ts.outputs.stamp }}
           if-no-files-found: error
