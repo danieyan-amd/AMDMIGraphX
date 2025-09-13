@@ -62,14 +62,14 @@ jobs:
           # Execute tests against generated tree; script writes per-model logs under test_generator/logs/{fp16,fp32}
           bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee "${ROOT}/raw.log"
 
-          # Normalize logs into our timestamped folder for artifacts and summary
+          # Copy per-model logs into our timestamped folder
+          shopt -s nullglob
           for p in fp16 fp32; do
-            if [ -d tools/model_zoo/test_generator/logs/$p ]; then
-              cp -f tools/model_zoo/test_generator/logs/$p/*.log "${ROOT}/$p/" 2>/dev/null || true
-            fi
+            src_dir="tools/model_zoo/test_generator/logs/$p"
+            [ -d "$src_dir" ] && cp -f "$src_dir"/*.log "${ROOT}/$p/" || true
           done
 
-          # Optional quick grep summaries from combined stdout
+          # Optional grep summaries from combined stdout
           grep -iE '(^|[^a-z])fp16([^a-z]|$)|half|16-bit' "${ROOT}/raw.log" > "${ROOT}/fp16/summary.log" || true
           grep -iE '(^|[^a-z])fp32([^a-z]|$)|single|32-bit' "${ROOT}/raw.log" > "${ROOT}/fp32/summary.log" || true
           grep -n -i -A2 -B2 'fp16' "${ROOT}/raw.log" > "${ROOT}/fp16/context.log" || true
@@ -87,20 +87,17 @@ jobs:
           OUT_JSON="${ROOT}/summary.json"
           python3 - << 'PY'
 import os, re, json
-
 run_ts = os.environ["RUN_TS"]
 root = os.path.join("logs", run_ts)
 summary = {"totals":{"pass":0,"fail":0},"regressions":{}}
 
 def parse_failure_message(txt:str) -> str:
-    # Prefer last traceback chunk
     m = list(re.finditer(r"Traceback \(most recent call last\):(.*?)(?:\n\s*\n|\Z)", txt, re.S))
     if m:
         block = m[-1].group(1).strip().splitlines()
         for line in reversed(block):
             if line.strip():
                 return line.strip()
-    # Fallback to last line that looks error-ish
     for line in reversed([l.rstrip() for l in txt.splitlines() if l.strip()]):
         if re.search(r"(error|exception|failed|segmentation fault|assert)", line, re.I):
             return line
@@ -136,13 +133,20 @@ for prec in ("fp32","fp16"):
     reg = summary["regressions"].get(prec, {"passed":[], "failed":[]})
     lines.append(f"## {prec.upper()}")
     lines.append(f"**Passed ({len(reg['passed'])})**")
-    lines += [f"- {m}" for m in reg["passed"]] or ["- none"]
+    if reg["passed"]:
+        for m in reg["passed"]:
+            lines.append(f"- {m}")
+    else:
+        lines.append("- none")
     lines.append(f"\n**Failed ({len(reg['failed'])})**")
-    lines += [f"- {item['model']}: `{item['message']}`" for item in reg["failed"]] or ["- none"]
+    if reg["failed"]:
+        for item in reg["failed"]:
+            lines.append(f"- {item['model']}: `{item['message']}`")
+    else:
+        lines.append("- none")
     lines.append("")
 md="\n".join(lines).strip()+"\n"
 with open(os.path.join(root,"summary.md"),"w") as f: f.write(md)
-
 step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
 if step_summary:
     with open(step_summary,"a") as f: f.write(md)
@@ -153,6 +157,5 @@ PY
         uses: actions/upload-artifact@v4
         with:
           name: model-zoo-logs-${{ steps.ts.outputs.stamp }}
-          path: |
-            logs/${{ steps.ts.outputs.stamp }}
+          path: logs/${{ steps.ts.outputs.stamp }}
           if-no-files-found: error
