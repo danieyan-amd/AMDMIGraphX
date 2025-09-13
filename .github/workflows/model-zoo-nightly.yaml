@@ -1,0 +1,28 @@
+name: Model Zoo Nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  model-zoo-tests:
+    runs-on: [self-hosted, gpu742f]
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install test dependencies
+        run: pip install -r tools/model_zoo/test_generator/requirements.txt
+      - name: Run model-zoo tests
+        env:
+          TARGET: gpu
+          ATOL: 0.001
+          RTOL: 0.001
+        run: node run-model-zoo-tests.js
