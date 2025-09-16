@@ -53,24 +53,45 @@ jobs:
     steps:
       - name: Checkout (this repo)
         uses: actions/checkout@v4
+
       - name: Read config defaults
         id: read_config
         shell: bash
         run: |
           set -euo pipefail
-          CONFIG=.github/workflows/config.md
-          ROCM_VERSION=$(grep -m1 "ROCM_VERSION"             "$CONFIG" | cut -d"'" -f2)
-          BENCHMARK_UTILS_REPO=$(grep -m1 "BENCHMARK_UTILS_REPO" "$CONFIG" | cut -d"'" -f2)
-          ONNX_REPORTS_REPO=$(grep -m1 "ONNX_REPORTS_REPO"   "$CONFIG" | cut -d"'" -f2)
-          ORGANIZATION_REPO=$(grep -m1 "ORGANIZATION_REPO"   "$CONFIG" | cut -d"'" -f2)
-          RESULTS_TO_COMPARE=$(grep -m1 "RESULTS_TO_COMPARE" "$CONFIG" | cut -d"'" -f2)
-          PERFORMANCE_TEST_TIMEOUT=$(grep -m1 "PERFORMANCE_TEST_TIMEOUT" "$CONFIG" | cut -d"'" -f2)
-          echo "rocm_version=$ROCM_VERSION"                  >> "$GITHUB_OUTPUT"
-          echo "utils_repo=$BENCHMARK_UTILS_REPO"            >> "$GITHUB_OUTPUT"
-          echo "reports_repo=$ONNX_REPORTS_REPO"             >> "$GITHUB_OUTPUT"
-          echo "repo_org=$ORGANIZATION_REPO"                 >> "$GITHUB_OUTPUT"
-          echo "perf_number=$RESULTS_TO_COMPARE"             >> "$GITHUB_OUTPUT"
-          echo "perf_timeout=$PERFORMANCE_TEST_TIMEOUT"      >> "$GITHUB_OUTPUT"
+
+          CONFIG=".github/workflows/config.md"
+
+          grab() {
+            # Usage: grab KEY
+            # Returns the single-quoted value for KEY from $CONFIG, or empty if not found
+            if [[ -f "$CONFIG" ]]; then
+              (grep -m1 "$1" "$CONFIG" | cut -d"'" -f2) || true
+            fi
+          }
+
+          # Read (tolerant), then apply defaults if empty
+          ROCM_VERSION="$(grab ROCM_VERSION)";                         : "${ROCM_VERSION:=6.4.2}"
+          BENCHMARK_UTILS_REPO="$(grab BENCHMARK_UTILS_REPO)";         : "${BENCHMARK_UTILS_REPO:=ROCm/migraphx-benchmark-utils}"
+          ONNX_REPORTS_REPO="$(grab ONNX_REPORTS_REPO)";               : "${ONNX_REPORTS_REPO:=ROCm/migraphx-reports}"
+          ORGANIZATION_REPO="$(grab ORGANIZATION_REPO)";               : "${ORGANIZATION_REPO:=AMD}"
+          RESULTS_TO_COMPARE="$(grab RESULTS_TO_COMPARE)";             : "${RESULTS_TO_COMPARE:=10}"
+          PERFORMANCE_TEST_TIMEOUT="$(grab PERFORMANCE_TEST_TIMEOUT)"; : "${PERFORMANCE_TEST_TIMEOUT:=30m}"
+
+          echo "rocm_version=$ROCM_VERSION"            >> "$GITHUB_OUTPUT"
+          echo "utils_repo=$BENCHMARK_UTILS_REPO"      >> "$GITHUB_OUTPUT"
+          echo "reports_repo=$ONNX_REPORTS_REPO"       >> "$GITHUB_OUTPUT"
+          echo "repo_org=$ORGANIZATION_REPO"           >> "$GITHUB_OUTPUT"
+          echo "perf_number=$RESULTS_TO_COMPARE"       >> "$GITHUB_OUTPUT"
+          echo "perf_timeout=$PERFORMANCE_TEST_TIMEOUT">> "$GITHUB_OUTPUT"
+
+          echo "Resolved config:"
+          echo "  ROCM_VERSION=$ROCM_VERSION"
+          echo "  BENCHMARK_UTILS_REPO=$BENCHMARK_UTILS_REPO"
+          echo "  ONNX_REPORTS_REPO=$ONNX_REPORTS_REPO"
+          echo "  ORGANIZATION_REPO=$ORGANIZATION_REPO"
+          echo "  RESULTS_TO_COMPARE=$RESULTS_TO_COMPARE"
+          echo "  PERFORMANCE_TEST_TIMEOUT=$PERFORMANCE_TEST_TIMEOUT"
 
   call_reusable:
     needs: get_config
