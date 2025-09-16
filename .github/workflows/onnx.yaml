@@ -65,7 +65,6 @@ jobs:
           ORGANIZATION_REPO=$(grep -m1 "ORGANIZATION_REPO"   "$CONFIG" | cut -d"'" -f2)
           RESULTS_TO_COMPARE=$(grep -m1 "RESULTS_TO_COMPARE" "$CONFIG" | cut -d"'" -f2)
           PERFORMANCE_TEST_TIMEOUT=$(grep -m1 "PERFORMANCE_TEST_TIMEOUT" "$CONFIG" | cut -d"'" -f2)
-
           echo "rocm_version=$ROCM_VERSION"                  >> "$GITHUB_OUTPUT"
           echo "utils_repo=$BENCHMARK_UTILS_REPO"            >> "$GITHUB_OUTPUT"
           echo "reports_repo=$ONNX_REPORTS_REPO"             >> "$GITHUB_OUTPUT"
@@ -77,12 +76,12 @@ jobs:
     needs: get_config
     uses: danieyan-amd/migraphx-benchmark/.github/workflows/onnx-model.yaml@main
     with:
-      rocm_release:        ${{ github.event.inputs.rocm_release        || needs.get_config.outputs.rocm_version }}
-      benchmark_utils_repo:${{ github.event.inputs.benchmark_utils_repo || needs.get_config.outputs.utils_repo }}
-      onnx_reports_repo:   ${{ github.event.inputs.onnx_reports_repo   || needs.get_config.outputs.reports_repo }}
-      organization:        ${{ github.event.inputs.organization        || needs.get_config.outputs.repo_org }}
-      result_number:       ${{ github.event.inputs.result_number       || needs.get_config.outputs.perf_number }}
-      model_timeout:       ${{ github.event.inputs.model_timeout       || needs.get_config.outputs.perf_timeout }}
+      rocm_release:         ${{ github.event.inputs.rocm_release         || needs.get_config.outputs.rocm_version }}
+      benchmark_utils_repo: ${{ github.event.inputs.benchmark_utils_repo || needs.get_config.outputs.utils_repo }}
+      onnx_reports_repo:    ${{ github.event.inputs.onnx_reports_repo    || needs.get_config.outputs.reports_repo }}
+      organization:         ${{ github.event.inputs.organization         || needs.get_config.outputs.repo_org }}
+      result_number:        ${{ github.event.inputs.result_number        || needs.get_config.outputs.perf_number }}
+      model_timeout:        ${{ github.event.inputs.model_timeout        || needs.get_config.outputs.perf_timeout }}
     secrets:
       gh_token:  ${{ secrets.MIGRAPHX_BOT_TOKEN }}
       mail_user: ${{ secrets.MAIL_USERNAME }}
