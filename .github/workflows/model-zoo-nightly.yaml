@@ -30,9 +30,8 @@ permissions:
   contents: read
 
 env:
-  # Host paths on your GPU runner:
-  DATASETS_DIR: /usr/share/migraphx/migraph_datasets   # adjust if different
-  ROCM_DIR: /opt/rocm                                  # host ROCm/MIGraphX install
+  DATASETS_DIR: /usr/share/migraphx/migraph_datasets
+  ROCM_DIR: /opt/rocm
   DOCKER_IMAGE: onnx-model-thin:${{ github.sha }}
 
 jobs:
@@ -44,11 +43,9 @@ jobs:
       - name: Checkout sources (caller repo)
         uses: actions/checkout@v4
         with:
-          # For PRs, use the head repo/ref; fall back to caller repo & develop
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.ref || 'develop' }}
           fetch-depth: 1
-          # Explicit token is required in reusable workflows
           token: ${{ secrets.gh_token || github.token }}
 
       - name: Write thin Dockerfile
@@ -59,24 +56,12 @@ jobs:
           cat > .ci/Thin.Dockerfile <<'DOCKER'
           FROM ubuntu:22.04
           ARG DEBIAN_FRONTEND=noninteractive
-
-          # Base tools + Python + Node 20 (no ROCm here)
           RUN apt-get update && apt-get install -y --no-install-recommends \
                 ca-certificates curl gnupg \
                 python3 python3-pip python3-venv python3-dev \
                 build-essential git pkg-config \
-                # nodejs 20.x
-            && install -d /etc/apt/keyrings \
-            && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-               | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-            && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
-               > /etc/apt/sources.list.d/nodesource.list \
-            && apt-get update && apt-get install -y --no-install-recommends nodejs \
             && rm -rf /var/lib/apt/lists/*
-
-          # QoL
           RUN python3 -m pip install --upgrade pip wheel
-
           WORKDIR /workspace
           DOCKER
 
@@ -99,23 +84,16 @@ jobs:
           set -euo pipefail
           mkdir -p "logs/${RUN_TS}"
 
-          # Runtime env pointing at host ROCm inside the container
-          export PY_ROCM="/opt/rocm/lib"
-          export LD_ROCM="/opt/rocm/lib"
-
           docker run --rm \
             --name "onnx-model-${GITHUB_RUN_ID}" \
-            # GPU devices from host
             --device=/dev/dri --device=/dev/kfd \
             --network=host --group-add=video \
-            # runtime env (point to ROCm libs)
-            -e PYTHONPATH="${PY_ROCM}:${PYTHONPATH:-}" \
-            -e LD_LIBRARY_PATH="${LD_ROCM}:${LD_LIBRARY_PATH:-}" \
             -e TARGET=gpu \
             -e ATOL=0.001 \
             -e RTOL=0.001 \
             -e RUN_TS="${RUN_TS}" \
-            # mount host ROCm & datasets & repo workspace
+            -e PYTHONPATH="/opt/rocm/lib:${PYTHONPATH:-}" \
+            -e LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}" \
             -v "${ROCM_DIR}:/opt/rocm:ro" \
             -v "${DATASETS_DIR}:/datasets:ro" \
             -v "$GITHUB_WORKSPACE:/workspace" \
@@ -124,32 +102,42 @@ jobs:
             bash -lc "
               set -euo pipefail
 
-              # Install repo-pinned Python deps
+              # --- Install Node.js 20 INSIDE the container (runtime hotfix) ---
+              apt-get update -y
+              apt-get install -y --no-install-recommends ca-certificates curl gnupg
+              install -d /etc/apt/keyrings
+              curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+                | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+              echo 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main' \
+                > /etc/apt/sources.list.d/nodesource.list
+              apt-get update -y && apt-get install -y --no-install-recommends nodejs
+
+              # If your requirements.txt contains 'torch' (CUDA wheels) it will overwrite ROCm Torch.
+              # Either preinstall ROCm Torch or skip torch from requirements:
+              # pip3 install --index-url https://download.pytorch.org/whl/rocm6.4 torch torchvision torchaudio
+              # pip3 install -r tools/model_zoo/test_generator/requirements.txt --no-deps
+              # Or if torch isn't needed, just:
               if [ -f tools/model_zoo/test_generator/requirements.txt ]; then
-                # TIP: If requirements.txt contains torch with CUDA wheels,
-                # consider removing it or installing ROCm builds separately.
                 pip3 install -r tools/model_zoo/test_generator/requirements.txt
               fi
 
-              # Ensure scripts & logs dirs exist
               chmod +x tools/model_zoo/test_generator/test_models.sh || true
               chmod +x ./run-model-zoo-tests.js || true
               mkdir -p 'logs/${RUN_TS}/fp16' 'logs/${RUN_TS}/fp32'
 
               echo 'Datasets at /datasets'
+              node --version
               node ./run-model-zoo-tests.js --datasets /datasets --out tools/model_zoo/onnx_zoo
 
               echo 'Running model zoo tests...'
               bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee 'logs/${RUN_TS}/raw.log'
 
-              # Copy per-precision logs
               shopt -s nullglob
               for p in fp16 fp32; do
                 src=\"tools/model_zoo/test_generator/logs/\$p\"
                 [ -d \"\$src\" ] && cp -f \"\$src\"/*.log 'logs/${RUN_TS}/'\"\$p\"'/' || true
               done
 
-              # Write a small Node summarizer (avoids YAML heredoc issues)
               cat > .summary.js <<'EOS'
               const fs = require('fs');
               const path = require('path');
@@ -157,21 +145,19 @@ jobs:
               const root = path.join('logs', runTs);
               const precs = ['fp32','fp16'];
               const summary = { totals:{pass:0,fail:0}, regressions:{} };
-
               function looksFailed(text){
-                return /(Traceback \(most recent call last\)|\bERROR\b|AssertionError|Segmentation fault|^error:)/im.test(text);
+                return /(Traceback \(most recent call last\)|\\bERROR\\b|AssertionError|Segmentation fault|^error:)/im.test(text);
               }
               function failureMessage(text){
-                const tb=[...text.matchAll(/Traceback \(most recent call last\):([\s\S]*?)(?:\n\s*\n|\Z)/g)];
+                const tb=[...text.matchAll(/Traceback \\(most recent call last\\):([\\s\\S]*?)(?:\\n\\s*\\n|\\Z)/g)];
                 if(tb.length){
-                  const block=tb[tb.length-1][1].trim().split(/\r?\n/).reverse();
+                  const block=tb[tb.length-1][1].trim().split(/\\r?\\n/).reverse();
                   for(const line of block) if(line.trim()) return line.trim();
                 }
-                const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).reverse();
+                const lines=text.split(/\\r?\\n/).map(l=>l.trim()).filter(Boolean).reverse();
                 for(const l of lines) if (/(error|exception|failed|segmentation fault|assert)/i.test(l)) return l;
                 return 'failed (see log)';
               }
-
               for (const prec of precs){
                 const d = path.join(root, prec);
                 const reg = { passed: [], failed: [] };
@@ -186,19 +172,17 @@ jobs:
                 }
                 summary.regressions[prec] = reg;
               }
-
               fs.writeFileSync(path.join(root, 'summary.json'), JSON.stringify(summary, null, 2));
-
               const lines = [];
-              lines.push('## Totals', `- PASS: ${summary.totals.pass}`, `- FAIL: ${summary.totals.fail}`, '');
+              lines.push('## Totals', \`- PASS: \${summary.totals.pass}\`, \`- FAIL: \${summary.totals.fail}\`, '');
               for (const prec of precs){
                 const reg = summary.regressions[prec];
-                lines.push(`## ${prec.toUpperCase()}`);
-                lines.push(`**Passed (${reg.passed.length})**`);
-                if (reg.passed.length) reg.passed.forEach(m => lines.push(`- ${m}`)); else lines.push('- none');
+                lines.push(\`## \${prec.toUpperCase()}\`);
+                lines.push(\`**Passed (\${reg.passed.length})**\`);
+                if (reg.passed.length) reg.passed.forEach(m => lines.push(\`- \${m}\`)); else lines.push('- none');
                 lines.push('');
-                lines.push(`**Failed (${reg.failed.length})**`);
-                if (reg.failed.length) reg.failed.forEach(it => lines.push(`- ${it.model}: \`${it.message}\``)); else lines.push('- none');
+                lines.push(\`**Failed (\${reg.failed.length})**\`);
+                if (reg.failed.length) reg.failed.forEach(it => lines.push(\`- \${it.model}: \\\`\${it.message}\\\`\`)); else lines.push('- none');
                 lines.push('');
               }
               fs.writeFileSync(path.join(root, 'summary.md'), lines.join('\\n'));
