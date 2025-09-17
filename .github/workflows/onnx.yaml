@@ -59,32 +59,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           CONFIG=".github/workflows/config.md"
-
           grab() {
-            # Usage: grab KEY
-            # Returns the single-quoted value for KEY from $CONFIG, or empty if not found
             if [[ -f "$CONFIG" ]]; then
               (grep -m1 "$1" "$CONFIG" | cut -d"'" -f2) || true
             fi
           }
-
-          # Read (tolerant), then apply defaults if empty
           ROCM_VERSION="$(grab ROCM_VERSION)";                         : "${ROCM_VERSION:=6.4.2}"
           BENCHMARK_UTILS_REPO="$(grab BENCHMARK_UTILS_REPO)";         : "${BENCHMARK_UTILS_REPO:=danieyan-amd/migraphx-benchmark-utils}"
           ONNX_REPORTS_REPO="$(grab ONNX_REPORTS_REPO)";               : "${ONNX_REPORTS_REPO:=ROCm/migraphx-reports}"
           ORGANIZATION_REPO="$(grab ORGANIZATION_REPO)";               : "${ORGANIZATION_REPO:=AMD}"
           RESULTS_TO_COMPARE="$(grab RESULTS_TO_COMPARE)";             : "${RESULTS_TO_COMPARE:=10}"
           PERFORMANCE_TEST_TIMEOUT="$(grab PERFORMANCE_TEST_TIMEOUT)"; : "${PERFORMANCE_TEST_TIMEOUT:=30m}"
-
           echo "rocm_version=$ROCM_VERSION"            >> "$GITHUB_OUTPUT"
           echo "utils_repo=$BENCHMARK_UTILS_REPO"      >> "$GITHUB_OUTPUT"
           echo "reports_repo=$ONNX_REPORTS_REPO"       >> "$GITHUB_OUTPUT"
           echo "repo_org=$ORGANIZATION_REPO"           >> "$GITHUB_OUTPUT"
           echo "perf_number=$RESULTS_TO_COMPARE"       >> "$GITHUB_OUTPUT"
           echo "perf_timeout=$PERFORMANCE_TEST_TIMEOUT">> "$GITHUB_OUTPUT"
-
           echo "Resolved config:"
           echo "  ROCM_VERSION=$ROCM_VERSION"
           echo "  BENCHMARK_UTILS_REPO=$BENCHMARK_UTILS_REPO"
@@ -105,5 +97,3 @@ jobs:
       model_timeout:        ${{ github.event.inputs.model_timeout        || needs.get_config.outputs.perf_timeout }}
     secrets:
       gh_token:  ${{ secrets.MIGRAPHX_BOT_TOKEN }}
-      mail_user: ${{ secrets.MAIL_USERNAME }}
-      mail_pass: ${{ secrets.MAIL_PASSWORD }}
