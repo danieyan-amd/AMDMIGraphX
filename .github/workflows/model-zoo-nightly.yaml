@@ -1,197 +1,145 @@
-name: ONNX Model Zoo Tests (Thin Docker)
+name: Model Zoo Nightly
 
 on:
-  workflow_call:
-    inputs:
-      rocm_release:
-        type: string
-        required: true
-      onnx_reports_repo:
-        type: string
-        required: true
-      organization:
-        type: string
-        required: true
-      result_number:
-        type: string
-        required: true
-      model_timeout:
-        type: string
-        required: true
-    secrets:
-      gh_token:
-        required: true
-      mail_user:
-        required: true
-      mail_pass:
-        required: true
-
-permissions:
-  contents: read
-
-env:
-  DATASETS_DIR: /usr/share/migraphx/migraph_datasets
-  ROCM_DIR: /opt/rocm
-  DOCKER_IMAGE: onnx-model-thin:${{ github.sha }}
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
   model-zoo-tests:
-    runs-on: [self-hosted, Linux, X64, gpu942f]
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 60
 
+    env:
+      DATASETS_DIR: /usr/share/migraphx/migraph_datasets
+      # make migraphx Python binding visible
+      PYTHONPATH: /opt/rocm/lib:${PYTHONPATH}
+      LD_LIBRARY_PATH: /opt/rocm/lib:${LD_LIBRARY_PATH}
+
     steps:
-      - name: Checkout sources (caller repo)
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-node@v3
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.ref || 'develop' }}
-          fetch-depth: 1
-          token: ${{ secrets.gh_token || github.token }}
+          node-version: 20
 
-      - name: Write thin Dockerfile
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .ci
-          cat > .ci/Thin.Dockerfile <<'DOCKER'
-          FROM ubuntu:22.04
-          ARG DEBIAN_FRONTEND=noninteractive
-          RUN apt-get update && apt-get install -y --no-install-recommends \
-                ca-certificates curl gnupg \
-                python3 python3-pip python3-venv python3-dev \
-                build-essential git pkg-config \
-            && rm -rf /var/lib/apt/lists/*
-          RUN python3 -m pip install --upgrade pip wheel
-          WORKDIR /workspace
-          DOCKER
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-      - name: Build thin image (no ROCm inside)
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker build -t "$DOCKER_IMAGE" -f .ci/Thin.Dockerfile .
+      - name: Install test dependencies
+        run: pip install -r tools/model_zoo/test_generator/requirements.txt
 
       - name: Init timestamp
         id: ts
-        shell: bash
         run: echo "stamp=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_OUTPUT"
 
-      - name: Run ONNX model tests (host ROCm mounted)
-        shell: bash
+      - name: Ensure scripts are executable
+        run: |
+          chmod +x tools/model_zoo/test_generator/test_models.sh
+          chmod +x ./run-model-zoo-tests.js
+      - name: Generate cases from datasets (repo-root JS)
+        run: |
+          set -e
+          echo "runner.name=${{ runner.name }}"
+          hostname
+          ls -ld "${DATASETS_DIR}"
+          node ./run-model-zoo-tests.js \
+            --datasets "${DATASETS_DIR}" \
+            --out tools/model_zoo/onnx_zoo
+      - name: Run model-zoo tests and capture logs
+        env:
+          TARGET: gpu
+          ATOL: 0.001
+          RTOL: 0.001
+          RUN_TS: ${{ steps.ts.outputs.stamp }}
+          PYTHONPATH: /opt/rocm/lib:${PYTHONPATH}
+          LD_LIBRARY_PATH: /opt/rocm/lib:${LD_LIBRARY_PATH}
+        run: |
+          set -e
+          ROOT="logs/${RUN_TS}"
+          mkdir -p "${ROOT}/fp16" "${ROOT}/fp32"
+          echo "${RUN_TS}" > "${ROOT}/run.timestamp"
+          echo "Testing models in tools/model_zoo/onnx_zoo"
+          bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee "${ROOT}/raw.log"
+          # Copy per-model logs into our timestamped folder
+          shopt -s nullglob
+          for p in fp16 fp32; do
+            src="tools/model_zoo/test_generator/logs/$p"
+            [ -d "$src" ] && cp -f "$src"/*.log "${ROOT}/$p/" || true
+          done
+          rm -f logs/latest && ln -s "${RUN_TS}" logs/latest
+      - name: Summarize results (totals, per-precision pass list, fail list with message)
         env:
           RUN_TS: ${{ steps.ts.outputs.stamp }}
         run: |
-          set -euo pipefail
-          mkdir -p "logs/${RUN_TS}"
-
-          docker run --rm \
-            --name "onnx-model-${GITHUB_RUN_ID}" \
-            --device=/dev/dri --device=/dev/kfd \
-            --network=host --group-add=video \
-            -e TARGET=gpu \
-            -e ATOL=0.001 \
-            -e RTOL=0.001 \
-            -e RUN_TS="${RUN_TS}" \
-            -e PYTHONPATH="/opt/rocm/lib:${PYTHONPATH:-}" \
-            -e LD_LIBRARY_PATH="/opt/rocm/lib:${LD_LIBRARY_PATH:-}" \
-            -v "${ROCM_DIR}:/opt/rocm:ro" \
-            -v "${DATASETS_DIR}:/datasets:ro" \
-            -v "$GITHUB_WORKSPACE:/workspace" \
-            -w /workspace \
-            "$DOCKER_IMAGE" \
-            bash -lc "
-              set -euo pipefail
-
-              # --- Install Node.js 20 INSIDE the container (runtime hotfix) ---
-              apt-get update -y
-              apt-get install -y --no-install-recommends ca-certificates curl gnupg
-              install -d /etc/apt/keyrings
-              curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-                | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-              echo 'deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main' \
-                > /etc/apt/sources.list.d/nodesource.list
-              apt-get update -y && apt-get install -y --no-install-recommends nodejs
-
-              # If your requirements.txt contains 'torch' (CUDA wheels) it will overwrite ROCm Torch.
-              # Either preinstall ROCm Torch or skip torch from requirements:
-              # pip3 install --index-url https://download.pytorch.org/whl/rocm6.4 torch torchvision torchaudio
-              # pip3 install -r tools/model_zoo/test_generator/requirements.txt --no-deps
-              # Or if torch isn't needed, just:
-              if [ -f tools/model_zoo/test_generator/requirements.txt ]; then
-                pip3 install -r tools/model_zoo/test_generator/requirements.txt
-              fi
-
-              chmod +x tools/model_zoo/test_generator/test_models.sh || true
-              chmod +x ./run-model-zoo-tests.js || true
-              mkdir -p 'logs/${RUN_TS}/fp16' 'logs/${RUN_TS}/fp32'
-
-              echo 'Datasets at /datasets'
-              node --version
-              node ./run-model-zoo-tests.js --datasets /datasets --out tools/model_zoo/onnx_zoo
-
-              echo 'Running model zoo tests...'
-              bash tools/model_zoo/test_generator/test_models.sh tools/model_zoo/onnx_zoo 2>&1 | tee 'logs/${RUN_TS}/raw.log'
-
-              shopt -s nullglob
-              for p in fp16 fp32; do
-                src=\"tools/model_zoo/test_generator/logs/\$p\"
-                [ -d \"\$src\" ] && cp -f \"\$src\"/*.log 'logs/${RUN_TS}/'\"\$p\"'/' || true
-              done
-
-              cat > .summary.js <<'EOS'
-              const fs = require('fs');
-              const path = require('path');
-              const runTs = process.env.RUN_TS;
-              const root = path.join('logs', runTs);
-              const precs = ['fp32','fp16'];
-              const summary = { totals:{pass:0,fail:0}, regressions:{} };
-              function looksFailed(text){
-                return /(Traceback \(most recent call last\)|\\bERROR\\b|AssertionError|Segmentation fault|^error:)/im.test(text);
-              }
-              function failureMessage(text){
-                const tb=[...text.matchAll(/Traceback \\(most recent call last\\):([\\s\\S]*?)(?:\\n\\s*\\n|\\Z)/g)];
-                if(tb.length){
-                  const block=tb[tb.length-1][1].trim().split(/\\r?\\n/).reverse();
-                  for(const line of block) if(line.trim()) return line.trim();
+          set -e
+          ROOT="logs/${RUN_TS}"
+          OUT_MD="${ROOT}/summary.md"
+          OUT_JSON="${ROOT}/summary.json"
+          node - <<'JS'
+          const fs = require('fs');
+          const path = require('path');
+          const runTs = process.env.RUN_TS;
+          const root = path.join('logs', runTs);
+          const precs = ['fp32','fp16'];
+          const summary = { totals: { pass: 0, fail: 0 }, regressions: {} };
+          function looksFailed(text) {
+            return /(Traceback \(most recent call last\)|\bERROR\b|AssertionError|Segmentation fault|^error:)/im.test(text);
+          }
+          function failureMessage(text) {
+            const tb = [...text.matchAll(/Traceback \(most recent call last\):([\s\S]*?)(?:\n\s*\n|\Z)/g)];
+            if (tb.length) {
+              const block = tb[tb.length-1][1].trim().split(/\r?\n/).reverse();
+              for (const line of block) if (line.trim()) return line.trim();
+            }
+            const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).reverse();
+            for (const l of lines) if (/(error|exception|failed|segmentation fault|assert)/i.test(l)) return l;
+            return 'failed (see log)';
+          }
+          for (const prec of precs) {
+            const d = path.join(root, prec);
+            const reg = { passed: [], failed: [] };
+            if (fs.existsSync(d) && fs.statSync(d).isDirectory()) {
+              const files = fs.readdirSync(d).filter(f => f.endsWith('.log')).sort();
+              for (const fn of files) {
+                const model = fn.slice(0, -4);
+                const txt = fs.readFileSync(path.join(d, fn), 'utf8');
+                if (looksFailed(txt)) {
+                  reg.failed.push({ model, message: failureMessage(txt) });
+                  summary.totals.fail += 1;
+                } else {
+                  reg.passed.push(model);
+                  summary.totals.pass += 1;
                 }
-                const lines=text.split(/\\r?\\n/).map(l=>l.trim()).filter(Boolean).reverse();
-                for(const l of lines) if (/(error|exception|failed|segmentation fault|assert)/i.test(l)) return l;
-                return 'failed (see log)';
               }
-              for (const prec of precs){
-                const d = path.join(root, prec);
-                const reg = { passed: [], failed: [] };
-                if (fs.existsSync(d) && fs.statSync(d).isDirectory()){
-                  const files = fs.readdirSync(d).filter(f => f.endsWith('.log')).sort();
-                  for (const fn of files){
-                    const model = fn.slice(0, -4);
-                    const txt = fs.readFileSync(path.join(d, fn), 'utf8');
-                    if (looksFailed(txt)){ reg.failed.push({ model, message: failureMessage(txt) }); summary.totals.fail++; }
-                    else { reg.passed.push(model); summary.totals.pass++; }
-                  }
-                }
-                summary.regressions[prec] = reg;
-              }
-              fs.writeFileSync(path.join(root, 'summary.json'), JSON.stringify(summary, null, 2));
-              const lines = [];
-              lines.push('## Totals', \`- PASS: \${summary.totals.pass}\`, \`- FAIL: \${summary.totals.fail}\`, '');
-              for (const prec of precs){
-                const reg = summary.regressions[prec];
-                lines.push(\`## \${prec.toUpperCase()}\`);
-                lines.push(\`**Passed (\${reg.passed.length})**\`);
-                if (reg.passed.length) reg.passed.forEach(m => lines.push(\`- \${m}\`)); else lines.push('- none');
-                lines.push('');
-                lines.push(\`**Failed (\${reg.failed.length})**\`);
-                if (reg.failed.length) reg.failed.forEach(it => lines.push(\`- \${it.model}: \\\`\${it.message}\\\`\`)); else lines.push('- none');
-                lines.push('');
-              }
-              fs.writeFileSync(path.join(root, 'summary.md'), lines.join('\\n'));
-              EOS
-
-              node .summary.js
-            "
-
-      - name: Upload logs and summary
+            }
+            summary.regressions[prec] = reg;
+          }
+          fs.writeFileSync(path.join(root, 'summary.json'), JSON.stringify(summary, null, 2));
+          const lines = [];
+          lines.push('## Totals');
+          lines.push(`- PASS: ${summary.totals.pass}`);
+          lines.push(`- FAIL: ${summary.totals.fail}`);
+          lines.push('');
+          for (const prec of precs) {
+            const reg = summary.regressions[prec];
+            lines.push(`## ${prec.toUpperCase()}`);
+            lines.push(`**Passed (${reg.passed.length})**`);
+            if (reg.passed.length) reg.passed.forEach(m => lines.push(`- ${m}`)); else lines.push('- none');
+            lines.push('');
+            lines.push(`**Failed (${reg.failed.length})**`);
+            if (reg.failed.length) reg.failed.forEach(it => lines.push(`- ${it.model}: \`${it.message}\``)); else lines.push('- none');
+            lines.push('');
+          }
+          const md = lines.join('\n');
+          fs.writeFileSync(path.join(root, 'summary.md'), md);
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+          }
+          JS
+          echo "Summary written to ${OUT_MD} and ${OUT_JSON}"
+      - name: Upload logs and summary (timestamped)
         uses: actions/upload-artifact@v4
         with:
           name: model-zoo-logs-${{ steps.ts.outputs.stamp }}
