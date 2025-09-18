@@ -34,7 +34,7 @@ on:
         default: "30m"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: "perftest-${{ github.head_ref || github.base_ref || 'schedule' }}"
