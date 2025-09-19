@@ -67,7 +67,7 @@ jobs:
           }
           ROCM_VERSION="$(grab ROCM_VERSION)";                         : "${ROCM_VERSION:=6.4.2}"
           BENCHMARK_UTILS_REPO="$(grab BENCHMARK_UTILS_REPO)";         : "${BENCHMARK_UTILS_REPO:=danieyan-amd/migraphx-benchmark-utils}"
-          ONNX_REPORTS_REPO="$(grab ONNX_REPORTS_REPO)";               : "${ONNX_REPORTS_REPO:=ROCm/migraphx-reports}"
+          ONNX_REPORTS_REPO="$(grab ONNX_REPORTS_REPO)";               : "${ONNX_REPORTS_REPO:=danieyan-amd/migraphx-reports}"
           ORGANIZATION_REPO="$(grab ORGANIZATION_REPO)";               : "${ORGANIZATION_REPO:=AMD}"
           RESULTS_TO_COMPARE="$(grab RESULTS_TO_COMPARE)";             : "${RESULTS_TO_COMPARE:=10}"
           PERFORMANCE_TEST_TIMEOUT="$(grab PERFORMANCE_TEST_TIMEOUT)"; : "${PERFORMANCE_TEST_TIMEOUT:=30m}"
