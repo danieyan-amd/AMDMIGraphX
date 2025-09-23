@@ -15,11 +15,11 @@ on:
       onnx_reports_repo:
         description: Repository where ONNX reports are stored
         required: true
-        default: "danieyan-amd/migraphx-reports"
+        default: "ROCm/migraphx-reports"
       benchmark_utils_repo:
         description: Repository where benchmark utils are stored
         required: true
-        default: "danieyan-amd/migraphx-benchmark-utils"
+        default: "ROCm/migraphx-benchmark-utils"
       organization:
         description: Organization based on which location of files will be different
         required: true
@@ -66,8 +66,8 @@ jobs:
             fi
           }
           ROCM_VERSION="$(grab ROCM_VERSION)";                         : "${ROCM_VERSION:=6.4.2}"
-          BENCHMARK_UTILS_REPO="$(grab BENCHMARK_UTILS_REPO)";         : "${BENCHMARK_UTILS_REPO:=danieyan-amd/migraphx-benchmark-utils}"
-          ONNX_REPORTS_REPO="$(grab ONNX_REPORTS_REPO)";               : "${ONNX_REPORTS_REPO:=danieyan-amd/migraphx-reports}"
+          BENCHMARK_UTILS_REPO="$(grab BENCHMARK_UTILS_REPO)";         : "${BENCHMARK_UTILS_REPO:=ROCm/migraphx-benchmark-utils}"
+          ONNX_REPORTS_REPO="$(grab ONNX_REPORTS_REPO)";               : "${ONNX_REPORTS_REPO:=ROCm/migraphx-reports}"
           ORGANIZATION_REPO="$(grab ORGANIZATION_REPO)";               : "${ORGANIZATION_REPO:=AMD}"
           RESULTS_TO_COMPARE="$(grab RESULTS_TO_COMPARE)";             : "${RESULTS_TO_COMPARE:=10}"
           PERFORMANCE_TEST_TIMEOUT="$(grab PERFORMANCE_TEST_TIMEOUT)"; : "${PERFORMANCE_TEST_TIMEOUT:=30m}"
@@ -87,7 +87,7 @@ jobs:
 
   call_reusable:
     needs: get_config
-    uses: danieyan-amd/migraphx-benchmark/.github/workflows/onnx-model.yaml@main
+    uses: ROCm/migraphx-benchmark/.github/workflows/onnx-model.yaml@main
     with:
       rocm_release:         ${{ github.event.inputs.rocm_release         || needs.get_config.outputs.rocm_version }}
       benchmark_utils_repo: ${{ github.event.inputs.benchmark_utils_repo || needs.get_config.outputs.utils_repo }}
