@@ -502,12 +502,29 @@ struct compile_manager
         }
         par_compile(compiles.size(), [&](auto i) { compiles[i](); });
 
-        // Replace and/or benchmark
-        for(const auto& cp : cps)
+        // Replace and/or benchmark.
+        // When a precompile_op is replaced with a code_object_op, its output shape
+        // may change (e.g. when the code_object_op's output uses the allocation
+        // buffer's strides rather than the precompile_op's computed strides).
+        // If a downstream precompile_op in this loop has the replaced instruction
+        // as an input, its actual input shapes now differ from the expected_inputs
+        // captured during parallel compilation, causing a shape mismatch.  Mark
+        // such plans for re-compilation with the updated shapes.
+        for(auto& cp : cps)
         {
             if(cp.results.empty())
                 continue;
-            cp.replace(m);
+            try
+            {
+                cp.replace(m);
+            }
+            catch(const std::exception&)
+            {
+                // Shape mismatch — clear results so this plan stays in cps
+                // and gets re-compiled with the current (post-replacement) shapes.
+                cp.results.clear();
+                cp.config = nullopt;
+            }
         }
 
         // Remove compile_plan already executed
@@ -532,7 +549,10 @@ void compile_ops::apply(module& m) const
     }
     cm.update_configs();
     cm.compile(m);
-    // Compile already tuned configs
+    // Re-fetch tuning configs: any plans that failed during the first compile
+    // due to input shape changes need fresh configs for the updated shapes.
+    cm.update_configs();
+    // Compile already tuned configs and re-compile any plans that failed above
     cm.compile(m);
     assert(cm.cps.empty());
 }
