@@ -379,6 +379,11 @@ struct context
         pc->load();
         pc->auto_save = true;
     }
+    void load_problem_cache(const std::string& path, const std::string& backend)
+    {
+        pc->load(path, backend);
+        pc->auto_save = true;
+    }
 
     private:
     // TODO: Make this a vector to support multiple devices
