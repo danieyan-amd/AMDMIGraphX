@@ -110,8 +110,7 @@ struct concat_past_present
             // std::size_t is undefined behaviour (caught by UBSan), so guard against
             // negative values before narrowing.
             const std::int64_t signed_seqlen =
-                is_prompt ? std::int64_t{0}
-                          : static_cast<std::int64_t>(seqlens_k[batch_index]);
+                is_prompt ? std::int64_t{0} : static_cast<std::int64_t>(seqlens_k[batch_index]);
             if(signed_seqlen < 0 or
                static_cast<std::size_t>(signed_seqlen) >= past_buffer_sequence_length)
                 return;
