@@ -46,6 +46,7 @@ static program parse_onnx_from(const onnx_options& options, Ts&&... xs)
     parser.map_input_dims     = options.map_input_dims;
     parser.dim_params         = options.dim_params;
     parser.map_dyn_input_dims = options.map_dyn_input_dims;
+    parser.use_debug_symbols  = options.use_debug_symbols;
     auto dim_val              = options.default_dim_value;
     if(dim_val != 0)
     {
@@ -63,6 +64,7 @@ static program parse_onnx_from(const onnx_options& options, Ts&&... xs)
     {
         parser.default_dyn_dim_value = options.default_dyn_dim_value;
     }
+    parser.default_set = options.default_set;
     if(not options.map_input_dims.empty() and not options.map_dyn_input_dims.empty())
     {
         MIGRAPHX_THROW("PARSE_ONNX_FROM: both map_input_dims and map_dyn_input_dims non-empty, only"

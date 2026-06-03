@@ -42,8 +42,8 @@
 #include <migraphx/json.hpp>
 #include <migraphx/make_op.hpp>
 #include <migraphx/op/common.hpp>
+#include <migraphx/op/builder/insert.hpp>
 #include <migraphx/float8.hpp>
-#include <migraphx/logger.hpp>
 #include <migraphx/pass_manager.hpp>
 #include <migraphx/version.h>
 #include <migraphx/iterator_for.hpp>
@@ -349,6 +349,14 @@ migraphx::shape to_shape(const py::buffer_info& info)
     }
 }
 
+namespace {
+struct py_macro
+{
+    std::string op_name;
+    migraphx::value options;
+};
+} // namespace
+
 MIGRAPHX_PYBIND11_MODULE(migraphx, m)
 {
     py::class_<migraphx::shape> shape_cls(m, "shape");
@@ -398,9 +406,13 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
         .def(py::init<>())
         .def(py::init<std::size_t, std::size_t>())
         .def(py::init<std::size_t, std::size_t, std::set<std::size_t>>())
-        .def_readwrite("min", &migraphx::shape::dynamic_dimension::min)
-        .def_readwrite("max", &migraphx::shape::dynamic_dimension::max)
-        .def_readwrite("optimals", &migraphx::shape::dynamic_dimension::optimals)
+        .def_property_readonly(
+            "min", [](const migraphx::shape::dynamic_dimension& d) { return d.get_interval().min; })
+        .def_property_readonly(
+            "max", [](const migraphx::shape::dynamic_dimension& d) { return d.get_interval().max; })
+        .def_property_readonly(
+            "optimals",
+            [](const migraphx::shape::dynamic_dimension& d) { return d.get_optimals(); })
         .def("is_fixed", &migraphx::shape::dynamic_dimension::is_fixed);
 
     py::class_<migraphx::argument>(m, "argument", py::buffer_protocol())
@@ -445,58 +457,138 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
         .def("name", [](migraphx::instruction_ref i) { return i->name(); })
         .def("get_literal",
              [](migraphx::instruction_ref i) { return i->get_literal().get_argument(); })
+        .def("get_debug_symbols",
+             [](migraphx::instruction_ref i) { return i->get_debug_symbols(); })
         .def(py::hash(py::self))
         .def(py::self == py::self)
         .def(py::self != py::self);
 
     py::class_<migraphx::module, std::unique_ptr<migraphx::module, py::nodelete>>(m, "module")
-        .def("print",
-             [](const migraphx::module& mm) { py::print(py::str(migraphx::to_string(mm))); })
-        .def("debug_print", [](const migraphx::module& mm) { migraphx::log::debug() << mm; })
+        .def("print", [](const migraphx::module& mm) { std::cout << mm << std::endl; })
         .def(
             "add_instruction",
             [](migraphx::module& mm,
                const migraphx::operation& op,
                std::vector<migraphx::instruction_ref>& args,
-               std::vector<migraphx::module*>& mod_args) {
-                return mm.add_instruction(op, args, mod_args);
+               std::vector<migraphx::module*>& mod_args,
+               const std::vector<std::string>& debug_symbols) {
+                auto ins = mm.add_instruction(op, args, mod_args);
+                if(not debug_symbols.empty())
+                    mm.add_debug_symbols(ins, {debug_symbols.begin(), debug_symbols.end()});
+                return ins;
             },
             py::arg("op"),
             py::arg("args"),
-            py::arg("mod_args") = std::vector<migraphx::module*>{})
+            py::arg("mod_args")      = std::vector<migraphx::module*>{},
+            py::arg("debug_symbols") = std::vector<std::string>{})
         .def(
             "add_literal",
-            [](migraphx::module& mm, migraphx::argument a) {
-                return mm.add_literal(a.get_shape(), a.data());
+            [](migraphx::module& mm,
+               migraphx::argument a,
+               const std::vector<std::string>& debug_symbols) {
+                auto ins = mm.add_literal(a.get_shape(), a.data());
+                if(not debug_symbols.empty())
+                    mm.add_debug_symbols(ins, {debug_symbols.begin(), debug_symbols.end()});
+                return ins;
             },
-            py::arg("data"))
+            py::arg("data"),
+            py::arg("debug_symbols") = std::vector<std::string>{})
         .def(
             "add_literal",
-            [](migraphx::module& mm, py::buffer data) {
+            [](migraphx::module& mm,
+               py::buffer data,
+               const std::vector<std::string>& debug_symbols) {
                 py::buffer_info info = data.request();
                 auto literal_shape   = to_shape(info);
-                return mm.add_literal(literal_shape, reinterpret_cast<char*>(info.ptr));
+                auto ins = mm.add_literal(literal_shape, reinterpret_cast<char*>(info.ptr));
+                if(not debug_symbols.empty())
+                    mm.add_debug_symbols(ins, {debug_symbols.begin(), debug_symbols.end()});
+                return ins;
             },
-            py::arg("data"))
+            py::arg("data"),
+            py::arg("debug_symbols") = std::vector<std::string>{})
         .def(
             "add_parameter",
-            [](migraphx::module& mm, const std::string& name, const migraphx::shape shape) {
-                return mm.add_parameter(name, shape);
+            [](migraphx::module& mm,
+               const std::string& name,
+               const migraphx::shape shape,
+               const std::vector<std::string>& debug_symbols) {
+                auto ins = mm.add_parameter(name, shape);
+                if(not debug_symbols.empty())
+                    mm.add_debug_symbols(ins, {debug_symbols.begin(), debug_symbols.end()});
+                return ins;
             },
             py::arg("name"),
-            py::arg("shape"))
+            py::arg("shape"),
+            py::arg("debug_symbols") = std::vector<std::string>{})
         .def(
             "add_return",
-            [](migraphx::module& mm, std::vector<migraphx::instruction_ref>& args) {
-                return mm.add_return(args);
+            [](migraphx::module& mm,
+               std::vector<migraphx::instruction_ref>& args,
+               const std::vector<std::string>& debug_symbols) {
+                auto ins = mm.add_return(args);
+                if(not debug_symbols.empty())
+                    mm.add_debug_symbols(ins, {debug_symbols.begin(), debug_symbols.end()});
+                return ins;
             },
-            py::arg("args"))
+            py::arg("args"),
+            py::arg("debug_symbols") = std::vector<std::string>{})
         .def(
             "replace_return",
-            [](migraphx::module& mm, std::vector<migraphx::instruction_ref>& args) {
-                return mm.replace_return(args);
+            [](migraphx::module& mm,
+               std::vector<migraphx::instruction_ref>& args,
+               const std::vector<std::string>& debug_symbols) {
+                auto ins = mm.replace_return(args);
+                if(not debug_symbols.empty())
+                    mm.add_debug_symbols(ins, {debug_symbols.begin(), debug_symbols.end()});
+                return ins;
             },
-            py::arg("args"))
+            py::arg("args"),
+            py::arg("debug_symbols") = std::vector<std::string>{})
+        .def(
+            "add_macro",
+            [](migraphx::module& mm,
+               const py_macro& mac,
+               std::vector<migraphx::instruction_ref>& args,
+               std::vector<migraphx::module*>& mod_args,
+               const std::vector<std::string>& debug_symbols) {
+                auto result =
+                    migraphx::op::builder::add(mac.op_name, mm, args, mod_args, mac.options);
+                if(not debug_symbols.empty())
+                {
+                    std::set<std::string> syms{debug_symbols.begin(), debug_symbols.end()};
+                    for(auto ins : migraphx::get_added_instructions(args, result))
+                        mm.add_debug_symbols(ins, syms);
+                }
+                return result;
+            },
+            py::arg("macro"),
+            py::arg("args"),
+            py::arg("mod_args")      = std::vector<migraphx::module*>{},
+            py::arg("debug_symbols") = std::vector<std::string>{})
+        .def(
+            "insert_macro",
+            [](migraphx::module& mm,
+               migraphx::instruction_ref ins,
+               const py_macro& mac,
+               std::vector<migraphx::instruction_ref>& args,
+               std::vector<migraphx::module*>& mod_args,
+               const std::vector<std::string>& debug_symbols) {
+                auto result = migraphx::op::builder::insert(
+                    mac.op_name, mm, ins, args, mod_args, mac.options);
+                if(not debug_symbols.empty())
+                {
+                    std::set<std::string> syms{debug_symbols.begin(), debug_symbols.end()};
+                    for(auto added : migraphx::get_added_instructions(args, result))
+                        mm.add_debug_symbols(added, syms);
+                }
+                return result;
+            },
+            py::arg("ins"),
+            py::arg("macro"),
+            py::arg("args"),
+            py::arg("mod_args")      = std::vector<migraphx::module*>{},
+            py::arg("debug_symbols") = std::vector<std::string>{})
         .def("__repr__", [](const migraphx::module& mm) { return migraphx::to_string(mm); })
         .def(
             "__iter__",
@@ -529,6 +621,12 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
             py::arg("offload_copy")    = true,
             py::arg("fast_math")       = true,
             py::arg("exhaustive_tune") = false)
+        .def(
+            "finalize",
+            [](migraphx::program& p, const migraphx::target& t) { p.finalize(t); },
+            "Attach a target+context and finalize an already-lowered program "
+            "(e.g. loaded from an .mxr) without running compile passes.",
+            py::arg("t"))
         .def("get_main_module", [](const migraphx::program& p) { return p.get_main_module(); })
         .def(
             "create_module",
@@ -539,10 +637,19 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
                  migraphx::parameter_map pm;
                  for(auto x : params)
                  {
-                     std::string key      = x.first.cast<std::string>();
-                     py::buffer b         = x.second.cast<py::buffer>();
-                     py::buffer_info info = b.request();
-                     pm[key]              = migraphx::argument(to_shape(info), info.ptr);
+                     std::string key = x.first.cast<std::string>();
+                     // Accept a migraphx.argument directly (preserves tuple-typed shapes
+                     // which can't round-trip through the Python buffer protocol).
+                     if(py::isinstance<migraphx::argument>(x.second))
+                     {
+                         pm[key] = x.second.cast<migraphx::argument>();
+                     }
+                     else
+                     {
+                         py::buffer b         = x.second.cast<py::buffer>();
+                         py::buffer_info info = b.request();
+                         pm[key]              = migraphx::argument(to_shape(info), info.ptr);
+                     }
                  }
                  return p.eval(pm);
              })
@@ -554,10 +661,17 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
                  migraphx::parameter_map pm;
                  for(auto x : params)
                  {
-                     std::string key      = x.first.cast<std::string>();
-                     py::buffer b         = x.second.cast<py::buffer>();
-                     py::buffer_info info = b.request();
-                     pm[key]              = migraphx::argument(to_shape(info), info.ptr);
+                     std::string key = x.first.cast<std::string>();
+                     if(py::isinstance<migraphx::argument>(x.second))
+                     {
+                         pm[key] = x.second.cast<migraphx::argument>();
+                     }
+                     else
+                     {
+                         py::buffer b         = x.second.cast<py::buffer>();
+                         py::buffer_info info = b.request();
+                         pm[key]              = migraphx::argument(to_shape(info), info.ptr);
+                     }
                  }
                  migraphx::execution_environment exec_env{
                      migraphx::any_ptr(reinterpret_cast<void*>(stream), stream_name), true};
@@ -570,9 +684,7 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
                  return ss.str();
              })
         .def("sort", &migraphx::program::sort)
-        .def("print",
-             [](const migraphx::program& p) { py::print(py::str(migraphx::to_string(p))); })
-        .def("debug_print", [](const migraphx::program& p) { migraphx::log::debug() << p; })
+        .def("print", [](const migraphx::program& p) { std::cout << p << std::endl; })
         .def("__eq__", std::equal_to<migraphx::program>{})
         .def("__ne__", std::not_equal_to<migraphx::program>{})
         .def("__repr__", [](const migraphx::program& p) { return migraphx::to_string(p); });
@@ -600,6 +712,19 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
         .value("forward", migraphx::op::rnn_direction::forward)
         .value("reverse", migraphx::op::rnn_direction::reverse)
         .value("bidirectional", migraphx::op::rnn_direction::bidirectional);
+
+    py::class_<py_macro>(m, "macro")
+        .def(py::init([](const std::string& name, py::kwargs kwargs) {
+            migraphx::value v = migraphx::value::object{};
+            if(kwargs)
+            {
+                v = migraphx::to_value(kwargs);
+            }
+            return py_macro{name, v};
+        }))
+        .def("name", [](const py_macro& mac) { return mac.op_name; })
+        .def("options",
+             [](const py_macro& mac) -> py::object { return to_py_object(mac.options); });
 
     m.def(
         "argument_from_pointer",
@@ -639,7 +764,8 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
            bool skip_unknown_operators,
            bool print_program_on_error,
            int64_t max_loop_iterations,
-           int64_t limit_max_iterations) {
+           int64_t limit_max_iterations,
+           bool use_debug_symbols) {
             migraphx::onnx_options options;
             options.default_dim_value      = default_dim_value;
             options.default_dyn_dim_value  = default_dyn_dim_value;
@@ -650,6 +776,7 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
             options.print_program_on_error = print_program_on_error;
             options.max_loop_iterations    = max_loop_iterations;
             options.limit_max_iterations   = limit_max_iterations;
+            options.use_debug_symbols      = use_debug_symbols;
             return migraphx::parse_onnx(filename, options);
         },
         "Parse onnx file",
@@ -664,7 +791,8 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
         py::arg("skip_unknown_operators") = false,
         py::arg("print_program_on_error") = false,
         py::arg("max_loop_iterations")    = 10,
-        py::arg("limit_max_iterations")   = std::numeric_limits<uint16_t>::max());
+        py::arg("limit_max_iterations")   = std::numeric_limits<uint16_t>::max(),
+        py::arg("use_debug_symbols")      = false);
 
     m.def(
         "parse_onnx_buffer",
@@ -676,7 +804,8 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
                map_dyn_input_dims,
            bool skip_unknown_operators,
            bool print_program_on_error,
-           const std::string& external_data_path) {
+           const std::string& external_data_path,
+           bool use_debug_symbols) {
             migraphx::onnx_options options;
             options.default_dim_value      = default_dim_value;
             options.default_dyn_dim_value  = default_dyn_dim_value;
@@ -685,6 +814,7 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
             options.skip_unknown_operators = skip_unknown_operators;
             options.print_program_on_error = print_program_on_error;
             options.external_data_path     = external_data_path;
+            options.use_debug_symbols      = use_debug_symbols;
             return migraphx::parse_onnx_buffer(onnx_buffer, options);
         },
         "Parse onnx file",
@@ -696,7 +826,8 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
             std::unordered_map<std::string, std::vector<migraphx::shape::dynamic_dimension>>(),
         py::arg("skip_unknown_operators") = false,
         py::arg("print_program_on_error") = false,
-        py::arg("external_data_path")     = "");
+        py::arg("external_data_path")     = "",
+        py::arg("use_debug_symbols")      = false);
 
     m.def(
         "load",
@@ -740,7 +871,11 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
         "Deserialize MIGraphX program",
         py::arg("b"));
 
-    m.def("get_target", &migraphx::make_target);
+    m.def("get_target", [](const std::string& name, py::kwargs kwargs) {
+        if(kwargs.empty())
+            return migraphx::make_target(name);
+        return migraphx::make_target(name, migraphx::to_value(kwargs));
+    });
     m.def("create_argument", [](const migraphx::shape& s, const std::vector<double>& values) {
         if(values.size() != s.elements())
             MIGRAPHX_THROW("Values and shape elements do not match");
@@ -791,14 +926,6 @@ MIGRAPHX_PYBIND11_MODULE(migraphx, m)
     m.def("from_gpu", &migraphx::gpu::from_gpu);
     m.def("gpu_sync", [] { migraphx::gpu::gpu_sync(); });
 #endif
-
-    m.def("set_log_header",
-          &migraphx::log::set_show_header,
-          "Enable or disable log header (timestamp, severity, source location)",
-          py::arg("show"));
-    m.def("get_log_header",
-          &migraphx::log::get_show_header,
-          "Get current log header visibility state");
 
 #ifdef VERSION_INFO
     m.attr("__version__") = VERSION_INFO;
