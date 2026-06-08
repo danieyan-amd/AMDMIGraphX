@@ -240,8 +240,10 @@ add_library(migraphx_gpu
     propagate_reshape_layout.cpp
     rocblas.cpp
     schedule_model.cpp
+    sqlite_problem_cache.cpp
     sync_device.cpp
     target.cpp
+    third_party/sqlite3.c
     time_op.cpp
     topk.cpp
     write_literals.cpp
@@ -256,6 +258,10 @@ if(MIGRAPHX_USE_MIOPEN)
             abs.cpp
             perfdb.cpp)
 endif()
+
+# Vendored SQLite amalgamation. Suppress all warnings; this is third-party C
+# code and we accept it as-is rather than carry local patches.
+set_source_files_properties(third_party/sqlite3.c PROPERTIES COMPILE_FLAGS "-w")
 
 enable_static_init(migraphx_gpu)
 
