@@ -50,6 +50,13 @@ struct compile_options
      */
     std::unordered_map<std::string, value> backend_options;
 
+    /**
+     * Path to the problem cache file. When non-empty, takes precedence over
+     * the MIGRAPHX_PROBLEM_CACHE environment variable. An empty string
+     * preserves the existing env-var-driven default.
+     */
+    std::string problem_cache_path;
+
     tracer trace{};
 };
 
