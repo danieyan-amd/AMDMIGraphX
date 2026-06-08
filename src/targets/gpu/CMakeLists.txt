@@ -190,14 +190,20 @@ add_library(migraphx_gpu
     problem_cache.cpp
     rocblas.cpp
     schedule_model.cpp
+    sqlite_problem_cache.cpp
     sync_device.cpp
     target.cpp
+    third_party/sqlite3.c
     time_op.cpp
     topk.cpp
     write_literals.cpp
     ${JIT_GPU_SRCS}
     ${MIOPEN_SRCS}
 )
+
+# Vendored SQLite amalgamation. Suppress all warnings; this is third-party C
+# code and we accept it as-is rather than carry local patches.
+set_source_files_properties(third_party/sqlite3.c PROPERTIES COMPILE_FLAGS "-w")
 
 set_target_properties(migraphx_gpu PROPERTIES EXPORT_NAME gpu)
 migraphx_generate_export_header(migraphx_gpu)
