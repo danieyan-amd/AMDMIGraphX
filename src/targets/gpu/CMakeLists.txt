@@ -237,6 +237,7 @@ add_library(migraphx_gpu
     prepare_reduce.cpp
     pooling.cpp
     problem_cache.cpp
+    problem_cache_aggregator.cpp
     propagate_reshape_layout.cpp
     rocblas.cpp
     schedule_model.cpp
