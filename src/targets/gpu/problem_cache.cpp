@@ -53,13 +53,21 @@ void problem_cache::load()
     auto pc_path = string_value_of(MIGRAPHX_PROBLEM_CACHE{});
     if(pc_path.empty())
         return;
-    if(not fs::exists(pc_path))
+    load(pc_path);
+}
+
+void problem_cache::load(const std::string& path)
+{
+    if(path.empty())
+        return;
+    path_override = path;
+    if(not fs::exists(path))
     {
         log::info() << "Problem cache not found. Creating new file.";
         save();
         return;
     }
-    auto root = from_json_string(read_string(pc_path));
+    auto root = from_json_string(read_string(path));
 
     // Detect on-disk format. The new device-keyed format serializes the outer
     // map (unordered_map<cache_device_key, ...>) as a JSON array of
@@ -99,13 +107,17 @@ void problem_cache::load()
         bucket.emplace(projected, entry.second);
     }
     log::info() << "Problem cache: migrated " << flat.size()
-                << " legacy entries into device bucket "
-                << to_json_string(to_value(device_key));
+                << " legacy entries into device bucket " << to_json_string(to_value(device_key));
 }
 
 void problem_cache::save() const
 {
-    auto pc_path = string_value_of(MIGRAPHX_PROBLEM_CACHE{});
+    // Prefer the path remembered from a load(path) call; fall back to the
+    // env var only if no explicit path was set. Either being empty means
+    // "no cache" -- a load(path) with empty path is a no-op upstream, and
+    // an unset env var means caching is disabled.
+    auto pc_path =
+        path_override.empty() ? string_value_of(MIGRAPHX_PROBLEM_CACHE{}) : path_override;
     if(pc_path.empty())
         return;
     write_string(pc_path, to_pretty_json_string(to_value(cache)));

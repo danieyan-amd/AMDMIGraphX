@@ -681,6 +681,9 @@ struct compiler
            {"--exhaustive-tune"},
            ap.help("Exhastively search for best tuning parameters for kernels"),
            ap.set_value(true));
+        ap(co.problem_cache_path,
+           {"--problem-cache"},
+           ap.help("Path to the problem cache file (overrides MIGRAPHX_PROBLEM_CACHE env var)"));
         ap(to_fp16, {"--fp16"}, ap.help("Quantize for fp16"), ap.set_value(true));
         ap(to_bf16, {"--bf16"}, ap.help("Quantize for bf16"), ap.set_value(true));
         ap(to_int8, {"--int8"}, ap.help("Quantize for int8"), ap.set_value(true));

@@ -97,7 +97,7 @@ std::vector<pass> target::get_passes(migraphx::context& gctx, const compile_opti
 {
     auto& ctx = any_cast<context>(gctx);
     ctx.set_exhaustive_tune_flag(options.exhaustive_tune);
-    ctx.load_problem_cache();
+    ctx.load_problem_cache(options.problem_cache_path);
 
     // clang-format off
     return

@@ -105,6 +105,10 @@ struct MIGRAPHX_GPU_EXPORT problem_cache
     void mark(const std::string& name, const value& problem);
     optional<value> get(const std::string& name, const value& problem) const;
     void load();
+    /// Load from an explicit path, bypassing the MIGRAPHX_PROBLEM_CACHE
+    /// environment variable. An empty path is treated as "no cache"
+    /// (no-op). The path is remembered for the next save().
+    void load(const std::string& path);
     void save() const;
     // Outer key identifies the device whose properties produced the entries
     // (device name, gfx name, CU count, wavefront size). Each device has its
@@ -121,6 +125,12 @@ struct MIGRAPHX_GPU_EXPORT problem_cache
     // counts) means the device couldn't be identified -- entries land in a
     // single anonymous bucket, which is still deterministic but not labelled.
     cache_device_key device_key{};
+
+    // Optional path override set by load(path). When non-empty, save() and
+    // any subsequent load() use this path instead of the MIGRAPHX_PROBLEM_-
+    // CACHE environment variable. Empty preserves the legacy env-var-driven
+    // default for callers that use the no-arg load().
+    std::string path_override{};
 };
 
 } // namespace gpu

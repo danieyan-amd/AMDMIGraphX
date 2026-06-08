@@ -409,6 +409,17 @@ struct context
         pc->load();
         pc->auto_save = true;
     }
+    /// Load from an explicit path, bypassing MIGRAPHX_PROBLEM_CACHE. An
+    /// empty string falls back to env-var-driven behaviour (matches the
+    /// no-arg overload). Used by compile_options.problem_cache_path.
+    void load_problem_cache(const std::string& path)
+    {
+        if(path.empty())
+            pc->load();
+        else
+            pc->load(path);
+        pc->auto_save = true;
+    }
 
     private:
     // TODO: Make this a vector to support multiple devices

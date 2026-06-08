@@ -26,6 +26,7 @@
 
 #include <migraphx/config.hpp>
 #include <migraphx/tracer.hpp>
+#include <string>
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
@@ -40,6 +41,13 @@ struct compile_options
 
     bool fast_math       = true;
     bool exhaustive_tune = false;
+
+    /**
+     * Path to the problem cache file. When non-empty, takes precedence over
+     * the MIGRAPHX_PROBLEM_CACHE environment variable. An empty string
+     * preserves the existing env-var-driven default.
+     */
+    std::string problem_cache_path;
 
     tracer trace{};
 };
