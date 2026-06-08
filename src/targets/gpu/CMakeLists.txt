@@ -188,6 +188,7 @@ add_library(migraphx_gpu
     perfdb.cpp
     pooling.cpp
     problem_cache.cpp
+    problem_cache_aggregator.cpp
     rocblas.cpp
     schedule_model.cpp
     sqlite_problem_cache.cpp
