@@ -174,6 +174,7 @@ add_library(migraphx_gpu
     hipblaslt.cpp
     hip_gemm_impl.cpp
     hsa_chiplet.cpp
+    json_problem_cache.cpp
     kernel.cpp
     lowering.cpp
     loop.cpp
