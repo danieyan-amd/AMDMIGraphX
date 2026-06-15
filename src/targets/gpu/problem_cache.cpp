@@ -73,7 +73,7 @@ void problem_cache::load(const std::string& path)
     // map (unordered_map<cache_device_key, ...>) as a JSON array of
     // [key_object, inner_map] pairs. The legacy flat format used a JSON
     // object whose keys were JSON-encoded {name, problem} strings (i.e. they
-    // begin with '{'). Anything else is an unrecognised pre-merge format
+    // begin with '{'). Anything else is an unrecognized pre-merge format
     // (e.g. an earlier prototype that string-keyed by hardware fingerprint);
     // skip rather than throw, so users with stale files start fresh.
     if(root.is_array())
@@ -86,7 +86,7 @@ void problem_cache::load(const std::string& path)
     const auto& first_key = root.begin()->get_key();
     if(first_key.empty() or first_key.front() != '{')
     {
-        log::warn() << "Problem cache: unrecognised on-disk format, starting fresh";
+        log::warn() << "Problem cache: unrecognized on-disk format, starting fresh";
         return;
     }
 

@@ -62,6 +62,10 @@
 
 #include <migraphx/netron_output.hpp>
 
+#ifdef HAVE_GPU
+#include <migraphx/gpu/problem_cache_aggregator.hpp>
+#endif
+
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -1023,6 +1027,204 @@ struct tf : command<tf>
         }
     }
 };
+
+#ifdef HAVE_GPU
+// ---------------------------------------------------------------------------
+// Problem-cache subcommands.
+// Thin wrappers around the offline aggregator library defined in
+// migraphx::gpu (see src/targets/gpu/problem_cache_aggregator.{hpp,cpp}).
+// They are gated on HAVE_GPU because the library lives inside migraphx_gpu;
+// builds without GPU support won't link these symbols.
+// ---------------------------------------------------------------------------
+namespace pc_cli {
+
+inline migraphx::gpu::cache_conflict_policy parse_conflict_policy(const std::string& s)
+{
+    if(s == "error" or s == "error-on-conflict")
+        return migraphx::gpu::cache_conflict_policy::error_on_conflict;
+    if(s == "first-wins")
+        return migraphx::gpu::cache_conflict_policy::first_wins;
+    if(s == "last-wins")
+        return migraphx::gpu::cache_conflict_policy::last_wins;
+    throw std::runtime_error("Unknown --conflict-policy '" + s +
+                             "' (expected: error | first-wins | last-wins)");
+}
+
+inline migraphx::gpu::legacy_device_policy parse_legacy_device_policy(const std::string& s)
+{
+    if(s == "preserve" or s == "preserve-empty")
+        return migraphx::gpu::legacy_device_policy::preserve_empty;
+    if(s == "map" or s == "map-to-device")
+        return migraphx::gpu::legacy_device_policy::map_to_device;
+    throw std::runtime_error("Unknown --empty-device-policy '" + s +
+                             "' (expected: preserve | map)");
+}
+
+inline void print_merge_report(const migraphx::gpu::cache_merge_report& r)
+{
+    std::cout << "Problem cache merge report\n"
+              << "  inputs ............... " << r.total_input_files << "\n"
+              << "  total input entries .. " << r.total_input_entries << "\n"
+              << "  output entries ....... " << r.total_output_entries << "\n"
+              << "  duplicates ........... " << r.duplicate_count << "\n"
+              << "  conflicts ............ " << r.conflict_count << "\n"
+              << "  legacy empty-device .. " << r.legacy_empty_device_count << "\n"
+              << "  elapsed (ms) ......... " << r.elapsed_ms << "\n"
+              << "  output ............... " << r.output_path << " (" << r.output_backend
+              << ")\n";
+}
+
+inline void write_merge_report_json(const migraphx::gpu::cache_merge_report& r,
+                                    const std::string& path)
+{
+    if(path.empty())
+        return;
+    migraphx::value v;
+    v["total_input_files"]         = r.total_input_files;
+    v["total_input_entries"]       = r.total_input_entries;
+    v["total_output_entries"]      = r.total_output_entries;
+    v["duplicate_count"]           = r.duplicate_count;
+    v["conflict_count"]            = r.conflict_count;
+    v["legacy_empty_device_count"] = r.legacy_empty_device_count;
+    v["metadata_loss_count"]       = r.metadata_loss_count;
+    v["elapsed_ms"]                = r.elapsed_ms;
+    v["output_path"]               = r.output_path;
+    v["output_backend"]            = r.output_backend;
+    migraphx::value per_file;
+    for(const auto& kv : r.per_input_file_counts)
+        per_file[kv.first] = kv.second;
+    v["per_input_file_counts"] = per_file;
+    migraphx::value per_dev;
+    for(const auto& kv : r.per_device_key_counts)
+        per_dev[kv.first] = kv.second;
+    v["per_device_key_counts"] = per_dev;
+    std::ofstream out(path);
+    out << migraphx::to_pretty_json_string(v);
+}
+
+inline void print_validation_report(const migraphx::gpu::cache_validation_report& r)
+{
+    std::cout << "Problem cache validation report\n"
+              << "  total entries ............... " << r.total_entries << "\n"
+              << "  distinct keys ............... " << r.distinct_keys << "\n"
+              << "  duplicate solutions ......... " << r.duplicate_solution_count << "\n"
+              << "  conflicting solutions ....... " << r.conflicting_solution_count << "\n"
+              << "  empty device-key entries .... " << r.empty_device_key_count << "\n"
+              << "  strict device-key ........... " << (r.strict_device_key ? "yes" : "no")
+              << "\n"
+              << "  valid ....................... " << (r.valid ? "yes" : "NO") << "\n";
+}
+
+} // namespace pc_cli
+
+struct aggregate_cache : command<aggregate_cache>
+{
+    std::vector<std::string> input_paths;
+    std::string output_path;
+    std::string report_path;
+    std::string conflict_policy     = "error";
+    std::string empty_device_policy = "preserve";
+    std::string mapped_device_key;
+
+    void parse(argument_parser& ap)
+    {
+        ap(input_paths,
+           {"--input", "-i"},
+           ap.help("Input cache file (JSON). Repeat the flag for multiple inputs."),
+           ap.append(),
+           ap.required());
+        ap(output_path,
+           {"--output", "-o"},
+           ap.help("Output (consolidated) cache file (JSON)"),
+           ap.required());
+        ap(report_path,
+           {"--report"},
+           ap.help("Optional path to write merge report as JSON"));
+        ap(conflict_policy,
+           {"--conflict-policy"},
+           ap.help("error | first-wins | last-wins  (default: error)"));
+        ap(empty_device_policy,
+           {"--empty-device-policy"},
+           ap.help("preserve | map  (default: preserve)"));
+        ap(mapped_device_key,
+           {"--mapped-device-key"},
+           ap.help("Device-key label when --empty-device-policy=map"));
+    }
+
+    void run() const
+    {
+        migraphx::gpu::cache_merge_options opts;
+        for(const auto& p : input_paths)
+            opts.inputs.push_back({p, "json"});
+        opts.output                  = {output_path, "json"};
+        opts.conflict_policy         = pc_cli::parse_conflict_policy(conflict_policy);
+        opts.empty_device_policy     = pc_cli::parse_legacy_device_policy(empty_device_policy);
+        opts.mapped_device_key       = mapped_device_key;
+
+        auto report = migraphx::gpu::merge_problem_caches(opts);
+        pc_cli::print_merge_report(report);
+        pc_cli::write_merge_report_json(report, report_path);
+    }
+};
+
+struct validate_cache : command<validate_cache>
+{
+    std::string input_path;
+    bool strict_device_key = true;
+
+    void parse(argument_parser& ap)
+    {
+        ap(input_path,
+           {"--input", "-i"},
+           ap.help("Cache file to validate (JSON)"),
+           ap.required());
+        ap(strict_device_key,
+           {"--strict-device-key"},
+           ap.help("Treat empty device-key entries as invalid (default: on)"),
+           ap.set_value(true));
+        ap(strict_device_key,
+           {"--no-strict-device-key"},
+           ap.help("Allow empty device-key entries"),
+           ap.set_value(false));
+    }
+
+    void run() const
+    {
+        auto report =
+            migraphx::gpu::validate_problem_cache({input_path, "json"}, strict_device_key);
+        pc_cli::print_validation_report(report);
+        if(not report.valid)
+            std::exit(1);
+    }
+};
+
+struct convert_cache : command<convert_cache>
+{
+    std::string input_path;
+    std::string output_path;
+
+    void parse(argument_parser& ap)
+    {
+        ap(input_path,
+           {"--input", "-i"},
+           ap.help("Input cache file (JSON)"),
+           ap.required());
+        ap(output_path,
+           {"--output", "-o"},
+           ap.help("Output cache file (JSON)"),
+           ap.required());
+    }
+
+    void run() const
+    {
+        auto report = migraphx::gpu::convert_problem_cache({input_path, "json"},
+                                                           {output_path, "json"});
+        std::cout << "Converted " << report.total_input_entries << " entries -> "
+                  << report.total_output_entries << " (output: " << report.output_path
+                  << ")\n";
+    }
+};
+#endif // HAVE_GPU
 
 struct main_command
 {

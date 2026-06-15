@@ -123,7 +123,7 @@ struct MIGRAPHX_GPU_EXPORT problem_cache
     // to. Set by the owning context from hip_device::get_device_key (see
     // gpu/context.hpp). A default-constructed key (empty strings, zero
     // counts) means the device couldn't be identified -- entries land in a
-    // single anonymous bucket, which is still deterministic but not labelled.
+    // single anonymous bucket, which is still deterministic but not labeled.
     cache_device_key device_key{};
 
     // Optional path override set by load(path). When non-empty, save() and
