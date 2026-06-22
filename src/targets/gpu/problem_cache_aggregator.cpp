@@ -24,6 +24,7 @@
 #include <migraphx/gpu/problem_cache_aggregator.hpp>
 #include <migraphx/gpu/json_problem_cache.hpp>
 #include <migraphx/gpu/problem_cache.hpp>
+#include <migraphx/gpu/device_name.hpp>
 #include <migraphx/errors.hpp>
 #include <migraphx/file_buffer.hpp>
 #include <migraphx/filesystem.hpp>
@@ -215,6 +216,27 @@ cache_merge_report merge_problem_caches(const cache_merge_options& options)
         for(const auto& raw_entry : entries)
         {
             auto entry = apply_legacy_device_policy(raw_entry, options);
+
+            // GFX architecture remapping: collapse variant names to canonical.
+            // E.g. gfx1151 (Strix Halo) -> gfx1150 (Strix) when they share ISA.
+            if(options.remap_gfx_to_canonical and not is_empty_device_key(entry.device_key))
+            {
+                auto canonical = get_canonical_gfx(entry.device_key.gfx_name);
+                if(canonical != entry.device_key.gfx_name)
+                {
+                    entry.device_key.gfx_name = canonical;
+                    // Also update device_name if it starts with the old gfx
+                    auto old_gfx = get_gfx_name(entry.device_key.device_name);
+                    if(old_gfx != canonical)
+                    {
+                        // Replace just the gfx prefix in device_name
+                        auto pos = entry.device_key.device_name.find(old_gfx);
+                        if(pos != std::string::npos)
+                            entry.device_key.device_name.replace(pos, old_gfx.size(), canonical);
+                    }
+                }
+            }
+
             if(is_empty_device_key(entry.device_key))
                 report.legacy_empty_device_count++;
 

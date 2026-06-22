@@ -127,8 +127,12 @@ struct cache_merge_options
     cache_conflict_policy conflict_policy    = cache_conflict_policy::error_on_conflict;
     legacy_device_policy empty_device_policy = legacy_device_policy::preserve_empty;
     std::string mapped_device_key;
-    bool strict_device_key    = true;
-    bool report_metadata_loss = true;
+    bool strict_device_key       = true;
+    bool report_metadata_loss    = true;
+    /// When true, remap GFX variant names (e.g. gfx1151 -> gfx1150) to
+    /// canonical names during merge, deduplicating entries across compatible
+    /// architectures. Uses get_canonical_gfx() from device_name.hpp.
+    bool remap_gfx_to_canonical  = false;
 };
 
 struct cache_merge_report
