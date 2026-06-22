@@ -685,9 +685,12 @@ struct compiler
            {"--exhaustive-tune"},
            ap.help("Exhastively search for best tuning parameters for kernels"),
            ap.set_value(true));
-        ap(co.problem_cache_path,
+        ap(co.problem_cache_paths,
            {"--problem-cache"},
-           ap.help("Path to the problem cache file (overrides MIGRAPHX_PROBLEM_CACHE env var)"));
+           ap.help("Path to a problem cache file. Repeat for multiple caches "
+                   "(searched in order, first hit wins). Overrides MIGRAPHX_PROBLEM_CACHE env var."),
+           ap.append());
+        // Backward compat: single --problem-cache still works (vector with 1 element)
         ap(to_fp16, {"--fp16"}, ap.help("Quantize for fp16"), ap.set_value(true));
         ap(to_bf16, {"--bf16"}, ap.help("Quantize for bf16"), ap.set_value(true));
         ap(to_int8, {"--int8"}, ap.help("Quantize for int8"), ap.set_value(true));
@@ -1125,6 +1128,7 @@ struct aggregate_cache : command<aggregate_cache>
     std::string conflict_policy     = "error";
     std::string empty_device_policy = "preserve";
     std::string mapped_device_key;
+    bool remap_gfx                  = false;
 
     void parse(argument_parser& ap)
     {
@@ -1149,6 +1153,11 @@ struct aggregate_cache : command<aggregate_cache>
         ap(mapped_device_key,
            {"--mapped-device-key"},
            ap.help("Device-key label when --empty-device-policy=map"));
+        ap(remap_gfx,
+           {"--remap-gfx"},
+           ap.help("Remap minor GFX variants to canonical names (e.g. gfx1151->gfx1150) "
+                   "to deduplicate entries across compatible architectures"),
+           ap.set_value(true));
     }
 
     void run() const
@@ -1160,6 +1169,7 @@ struct aggregate_cache : command<aggregate_cache>
         opts.conflict_policy         = pc_cli::parse_conflict_policy(conflict_policy);
         opts.empty_device_policy     = pc_cli::parse_legacy_device_policy(empty_device_policy);
         opts.mapped_device_key       = mapped_device_key;
+        opts.remap_gfx_to_canonical  = remap_gfx;
 
         auto report = migraphx::gpu::merge_problem_caches(opts);
         pc_cli::print_merge_report(report);

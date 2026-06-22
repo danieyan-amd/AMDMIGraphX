@@ -404,6 +404,9 @@ struct context
     }
 
     problem_cache& get_problem_cache() { return *pc; }
+
+    /// Load a single cache (backward compatible). Used when only one path
+    /// is provided or when falling back to the MIGRAPHX_PROBLEM_CACHE env var.
     void load_problem_cache()
     {
         pc->load();
@@ -421,6 +424,89 @@ struct context
         pc->auto_save = true;
     }
 
+    /// Load multiple caches in priority order (Tom's multi-cache requirement).
+    /// Caches are searched in order: first hit wins. New entries are written
+    /// to the LAST cache (the writable one). This supports the deployment
+    /// model where:
+    ///   paths[0] = app-provided cache (highest priority)
+    ///   paths[1] = local runtime cache (writable)
+    ///   paths[2] = shipped cache (read-only, lowest priority)
+    void load_problem_caches(const std::vector<std::string>& paths)
+    {
+        if(paths.empty())
+        {
+            load_problem_cache();
+            return;
+        }
+        if(paths.size() == 1)
+        {
+            load_problem_cache(paths.front());
+            return;
+        }
+        // Multi-cache: load each path into a separate problem_cache instance.
+        // The primary pc remains the writable cache (last in list).
+        // Read-only caches are searched first during lookup.
+        read_only_caches.clear();
+        for(std::size_t i = 0; i < paths.size() - 1; ++i)
+        {
+            auto ro = std::make_shared<problem_cache>();
+            ro->set_device_key(current_device->get_device_key());
+            if(not paths[i].empty())
+                ro->load(paths[i]);
+            read_only_caches.push_back(std::move(ro));
+        }
+        // Last path is the writable cache
+        const auto& writable_path = paths.back();
+        if(writable_path.empty())
+            pc->load();
+        else
+            pc->load(writable_path);
+        pc->auto_save = true;
+    }
+
+    /// Search all caches in priority order (read-only first, then writable).
+    /// Returns the first hit. This is what compile_ops should call.
+    optional<value> find_in_problem_caches(const std::string& name, const value& problem) const
+    {
+        // Search read-only caches first (highest priority)
+        for(const auto& ro : read_only_caches)
+        {
+            if(auto sol = ro->get(name, problem))
+                return sol;
+        }
+        // Then check the writable cache
+        return pc->get(name, problem);
+    }
+
+    /// Check if any cache has an entry for this problem.
+    bool problem_cache_has(const std::string& name, const value& problem) const
+    {
+        for(const auto& ro : read_only_caches)
+        {
+            if(ro->has(name, problem))
+                return true;
+        }
+        return pc->has(name, problem);
+    }
+
+    /// Insert into the writable cache only (new tuning solutions go here).
+    void problem_cache_insert(const std::string& name, const value& problem, const value& solution)
+    {
+        pc->insert(name, problem, solution);
+    }
+
+    /// Mark a problem as seen in the writable cache.
+    void problem_cache_mark(const std::string& name, const value& problem)
+    {
+        pc->mark(name, problem);
+    }
+
+    /// Save the writable cache (called explicitly or via auto_save on destruction).
+    void save_problem_cache() const
+    {
+        pc->save();
+    }
+
     private:
     // TODO: Make this a vector to support multiple devices
     std::shared_ptr<hip_device> current_device;
@@ -434,6 +520,9 @@ struct context
     shared<hip_event_ptr> begin_event           = nullptr;
     shared<hip_event_ptr> finish_event          = nullptr;
     std::shared_ptr<auto_save_problem_cache> pc = nullptr;
+    // Read-only caches searched before pc (priority order, highest first).
+    // These are populated by load_problem_caches() when multiple paths are provided.
+    std::vector<std::shared_ptr<problem_cache>> read_only_caches;
 };
 
 inline void migraphx_to_value(value& v, const context& ctx) { v = ctx.to_value(); }
