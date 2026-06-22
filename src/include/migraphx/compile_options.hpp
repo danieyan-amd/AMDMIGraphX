@@ -29,6 +29,7 @@
 #include <migraphx/value.hpp>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
@@ -51,10 +52,21 @@ struct compile_options
     std::unordered_map<std::string, value> backend_options;
 
     /**
-     * Path to the problem cache file. When non-empty, takes precedence over
-     * the MIGRAPHX_PROBLEM_CACHE environment variable. An empty string
-     * preserves the existing env-var-driven default.
+     * Ordered list of problem cache file paths to search during compilation.
+     * Caches are searched in priority order (first hit wins). New tuning
+     * solutions are written to the LAST cache in the list (the writable one).
+     *
+     * If empty, falls back to the MIGRAPHX_PROBLEM_CACHE environment variable.
+     *
+     * Typical usage (provided by the execution provider):
+     *   [0] = app-provided cache (e.g. Topaz ships their own)
+     *   [1] = local runtime cache (user's AppData)
+     *   [2] = shipped cache (next to migraphx_gpu.dll, read-only)
      */
+    std::vector<std::string> problem_cache_paths;
+
+    /// Convenience: single path (backward compatible with PR-C).
+    /// Sets problem_cache_paths to a single-element vector.
     std::string problem_cache_path;
 
     tracer trace{};
