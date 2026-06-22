@@ -63,6 +63,14 @@ MIGRAPHX_GPU_EXPORT bool gfx_default_rocblas(const context& ctx);
 MIGRAPHX_GPU_EXPORT bool hipblaslt_supported();
 MIGRAPHX_GPU_EXPORT bool hipblaslt_supported(const context& ctx);
 
+/// Returns the canonical GFX name for cache keying. Maps minor architecture
+/// variants to their major-version canonical name so that compatible GPUs
+/// share tuning data (e.g. gfx1151 -> gfx1150, gfx1032 -> gfx1030).
+/// If no mapping exists, returns the input unchanged.
+/// This is used by the aggregator's --remap-gfx option and can optionally
+/// be called during cache_device_key construction for runtime fallback.
+MIGRAPHX_GPU_EXPORT std::string get_canonical_gfx(const std::string& gfx_name);
+
 } // namespace gpu
 } // namespace MIGRAPHX_INLINE_NS
 } // namespace migraphx

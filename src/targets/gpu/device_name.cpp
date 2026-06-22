@@ -31,6 +31,7 @@
 #include <hip/hip_runtime_api.h>
 
 #include <iostream>
+#include <unordered_map>
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
@@ -41,6 +42,41 @@ MIGRAPHX_DECLARE_ENV_VAR(MIGRAPHX_SET_GEMM_PROVIDER)
 std::string get_gfx_name(const std::string& device_name)
 {
     return trim(split_string(device_name, ':').front());
+}
+
+std::string get_canonical_gfx(const std::string& gfx_name)
+{
+    // Maps minor GFX architecture variants to their canonical major version.
+    // GPUs in the same family produce identical tuning solutions when they
+    // share the same ISA, so we collapse them to avoid redundant cache entries.
+    //
+    // This table is maintained manually. Add new entries as new GPUs ship.
+    // Tom (Jun 17 meeting): "We have 11.0x for all Navi 31/32/33, then 11.5x
+    // for RDNA 3.5... we should be nuanced about the GFX architecture."
+    //
+    // Format: {variant} -> {canonical}
+    // Only add mappings where the ISA is confirmed identical.
+    static const std::unordered_map<std::string, std::string> aliases = {
+        // RDNA 3 family (gfx110x)
+        {"gfx1031", "gfx1030"}, // Navi 22 -> Navi 21
+        {"gfx1032", "gfx1030"}, // Navi 23 -> Navi 21
+        {"gfx1033", "gfx1030"}, // Navi 24 -> Navi 21
+        {"gfx1034", "gfx1030"}, // Phoenix  -> Navi 21
+        {"gfx1035", "gfx1030"}, // Rembrandt-> Navi 21
+        {"gfx1036", "gfx1030"}, // Raphael  -> Navi 21
+        // RDNA 3 (gfx110x)
+        {"gfx1101", "gfx1100"}, // Navi 32  -> Navi 31
+        {"gfx1102", "gfx1100"}, // Navi 33  -> Navi 31
+        {"gfx1103", "gfx1100"}, // Phoenix  -> Navi 31
+        // RDNA 3.5 (gfx115x) — Strix family
+        {"gfx1151", "gfx1150"}, // Strix Halo -> Strix
+        {"gfx1152", "gfx1150"}, // Kraken     -> Strix
+    };
+
+    auto it = aliases.find(gfx_name);
+    if(it != aliases.end())
+        return it->second;
+    return gfx_name;
 }
 
 int get_device_id()
