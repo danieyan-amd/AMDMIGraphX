@@ -528,7 +528,7 @@ struct context
         for(std::size_t i = 0; i < paths.size() - 1; ++i)
         {
             auto ro = std::make_shared<problem_cache>();
-            ro->set_device_key(current_device->get_device_key());
+            ro->set_device_key(*this);
             if(not paths[i].empty())
                 ro->load(paths[i]);
             read_only_caches.push_back(std::move(ro));

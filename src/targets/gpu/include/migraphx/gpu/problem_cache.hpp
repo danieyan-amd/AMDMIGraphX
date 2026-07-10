@@ -97,6 +97,8 @@ struct MIGRAPHX_GPU_EXPORT problem_cache
 {
     // Build and store this cache's device key from the owning context.
     void set_device_key(const context& ctx);
+    // Directly set the device key (used by tests and multi-cache setup).
+    void set_device_key(const cache_device_key& key);
     const cache_device_key& get_device_key() const;
 
     bool has(const std::string& name, const value& problem) const;

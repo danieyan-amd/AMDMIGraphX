@@ -60,6 +60,8 @@ void problem_cache::set_device_key(const context& ctx)
     device_key.wavefront_size = dev.get_wavefront_size();
 }
 
+void problem_cache::set_device_key(const cache_device_key& key) { device_key = key; }
+
 const cache_device_key& problem_cache::get_device_key() const { return device_key; }
 
 void problem_cache::load()
