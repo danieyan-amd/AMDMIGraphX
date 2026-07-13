@@ -1245,6 +1245,23 @@ inline void print_validation_report(const migraphx::gpu::cache_validation_report
               << "  valid ....................... " << (r.valid ? "yes" : "NO") << "\n";
 }
 
+// Run a problem-cache subcommand body, reporting any error cleanly with a
+// non-zero exit instead of letting the exception escape to std::terminate,
+// which fast-fails on Windows (exit code 0xC0000409) with no message.
+template <class F>
+void run_guarded(F&& body)
+{
+    try
+    {
+        body();
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << "error: " << e.what() << "\n";
+        std::exit(1);
+    }
+}
+
 } // namespace pc_cli
 
 struct aggregate_cache : command<aggregate_cache>
@@ -1289,18 +1306,20 @@ struct aggregate_cache : command<aggregate_cache>
 
     void run() const
     {
-        migraphx::gpu::cache_merge_options opts;
-        for(const auto& p : input_paths)
-            opts.inputs.push_back({p, "json"});
-        opts.output                  = {output_path, "json"};
-        opts.conflict_policy         = pc_cli::parse_conflict_policy(conflict_policy);
-        opts.empty_device_policy     = pc_cli::parse_legacy_device_policy(empty_device_policy);
-        opts.mapped_device_key       = mapped_device_key;
-        opts.remap_gfx_to_canonical  = remap_gfx;
+        pc_cli::run_guarded([&] {
+            migraphx::gpu::cache_merge_options opts;
+            for(const auto& p : input_paths)
+                opts.inputs.push_back({p, "json"});
+            opts.output                  = {output_path, "json"};
+            opts.conflict_policy         = pc_cli::parse_conflict_policy(conflict_policy);
+            opts.empty_device_policy     = pc_cli::parse_legacy_device_policy(empty_device_policy);
+            opts.mapped_device_key       = mapped_device_key;
+            opts.remap_gfx_to_canonical  = remap_gfx;
 
-        auto report = migraphx::gpu::merge_problem_caches(opts);
-        pc_cli::print_merge_report(report);
-        pc_cli::write_merge_report_json(report, report_path);
+            auto report = migraphx::gpu::merge_problem_caches(opts);
+            pc_cli::print_merge_report(report);
+            pc_cli::write_merge_report_json(report, report_path);
+        });
     }
 };
 
@@ -1327,11 +1346,13 @@ struct validate_cache : command<validate_cache>
 
     void run() const
     {
-        auto report =
-            migraphx::gpu::validate_problem_cache({input_path, "json"}, strict_device_key);
-        pc_cli::print_validation_report(report);
-        if(not report.valid)
-            std::exit(1);
+        pc_cli::run_guarded([&] {
+            auto report =
+                migraphx::gpu::validate_problem_cache({input_path, "json"}, strict_device_key);
+            pc_cli::print_validation_report(report);
+            if(not report.valid)
+                std::exit(1);
+        });
     }
 };
 
@@ -1354,11 +1375,13 @@ struct convert_cache : command<convert_cache>
 
     void run() const
     {
-        auto report = migraphx::gpu::convert_problem_cache({input_path, "json"},
-                                                           {output_path, "json"});
-        std::cout << "Converted " << report.total_input_entries << " entries -> "
-                  << report.total_output_entries << " (output: " << report.output_path
-                  << ")\n";
+        pc_cli::run_guarded([&] {
+            auto report = migraphx::gpu::convert_problem_cache({input_path, "json"},
+                                                               {output_path, "json"});
+            std::cout << "Converted " << report.total_input_entries << " entries -> "
+                      << report.total_output_entries << " (output: " << report.output_path
+                      << ")\n";
+        });
     }
 };
 #endif // HAVE_GPU
