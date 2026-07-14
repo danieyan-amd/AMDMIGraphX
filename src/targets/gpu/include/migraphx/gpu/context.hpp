@@ -502,13 +502,8 @@ struct context
         pc->auto_save = true;
     }
 
-    /// Load multiple caches in priority order (Tom's multi-cache requirement).
-    /// Caches are searched in order: first hit wins. New entries are written
-    /// to the LAST cache (the writable one). This supports the deployment
-    /// model where:
-    ///   paths[0] = app-provided cache (highest priority)
-    ///   paths[1] = local runtime cache (writable)
-    ///   paths[2] = shipped cache (read-only, lowest priority)
+    /// Load caches in priority order (first hit wins); new entries are written
+    /// to the last (writable) cache.
     void load_problem_caches(const std::vector<std::string>& paths)
     {
         if(paths.empty())
@@ -521,9 +516,7 @@ struct context
             load_problem_cache(paths.front());
             return;
         }
-        // Multi-cache: load each path into a separate problem_cache instance.
-        // The primary pc remains the writable cache (last in list).
-        // Read-only caches are searched first during lookup.
+        // Read-only caches (all but the last) are searched before the writable one.
         read_only_caches.clear();
         for(std::size_t i = 0; i < paths.size() - 1; ++i)
         {
@@ -533,7 +526,6 @@ struct context
                 ro->load(paths[i]);
             read_only_caches.push_back(std::move(ro));
         }
-        // Last path is the writable cache
         const auto& writable_path = paths.back();
         if(writable_path.empty())
             pc->load();

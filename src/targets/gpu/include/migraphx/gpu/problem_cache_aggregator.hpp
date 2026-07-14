@@ -38,22 +38,8 @@ namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
 namespace gpu {
 
-// ----------------------------------------------------------------------------
-// Offline aggregator over problem-cache files.
-//
-// This module reads one or more on-disk problem caches (currently only the
-// "json" backend, matching json_problem_cache's on-disk format), merges or
-// validates them according to a small set of policies, and writes the
-// result back out. It is deliberately an off-line tool surface: nothing
-// here is on the migraphx::compile() hot path.
-//
-// The aggregator works against a logical entry shape -- (device_key bucket
-// id, problem_key, solution_value) -- not against any particular backend's
-// internal types. The currently-supported backend tag is "json"; the design
-// reserves room for future backends ("sqlite", etc.) by carrying a
-// cache_input_spec::backend / cache_output_spec::backend string, but
-// supplying an unsupported backend throws.
-// ----------------------------------------------------------------------------
+// Offline merge/validate/convert over problem-cache files (json backend).
+// Off the compile() hot path; used by the driver's cache subcommands.
 
 enum class cache_conflict_policy
 {

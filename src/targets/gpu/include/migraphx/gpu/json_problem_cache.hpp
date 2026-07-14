@@ -38,30 +38,13 @@ namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
 namespace gpu {
 
-// Concrete problem_cache_backend that persists entries as a JSON file.
-//
-// The on-disk format matches the one already used by problem_cache::save():
-// a JSON array of [cache_device_key, inner_map] pairs, where inner_map is
-// itself an unordered_map<value, value>. This means a JSON file written by
-// problem_cache today is loadable by json_problem_cache and vice versa --
-// the integration in PR-B' can swap the in-place serialization for a
-// backend call without altering the on-disk schema.
-//
-// Legacy flat-object format (a single JSON object whose keys are
-// JSON-encoded {name, problem} strings) is migrated into the bucket
-// identified by `migration_device_key`. Set the migration key before
-// calling load() if you anticipate legacy files; otherwise legacy entries
-// land in an anonymous (default-constructed) bucket.
-//
-// This class deliberately does NOT consult the MIGRAPHX_PROBLEM_CACHE
-// environment variable. Path resolution is the caller's responsibility --
-// keeping env-var policy out of the backend lets unit tests use arbitrary
-// paths and lets the eventual aggregator route to multiple files.
+// A problem_cache_backend that persists entries as JSON, using the same
+// on-disk format as problem_cache::save() (an array of [cache_device_key,
+// inner_map] pairs). A legacy flat-object file is migrated into the bucket
+// set by set_migration_device_key(). Path resolution is the caller's job.
 struct MIGRAPHX_GPU_EXPORT json_problem_cache
 {
-    // Bucket used when migrating legacy flat-object files. Has no effect on
-    // load() for the current array-of-pairs format. Defaults to an
-    // anonymous (all-zero) key.
+    // Bucket for migrated legacy flat-object files (default: anonymous key).
     void set_migration_device_key(cache_device_key key);
 
     // problem_cache_backend concept members:
@@ -72,10 +55,7 @@ struct MIGRAPHX_GPU_EXPORT json_problem_cache
     optional<value> get(const cache_device_key& dk, const value& key) const;
     bool has(const cache_device_key& dk, const value& key) const;
 
-    // Exposed for tests and the future aggregator. Outer key is the device
-    // bucket; inner is the {name, problem} -> solution map. Mirrors the
-    // public `cache` member on problem_cache so PR-B' can adopt this
-    // backend without changing the schema.
+    // Device bucket -> ({name, problem} -> solution).
     std::unordered_map<cache_device_key, std::unordered_map<value, value>> cache;
 
     private:

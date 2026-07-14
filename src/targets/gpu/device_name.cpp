@@ -47,15 +47,9 @@ std::string get_gfx_name(const std::string& device_name)
 std::string get_canonical_gfx(const std::string& gfx_name)
 {
     // Maps minor GFX architecture variants to their canonical major version.
-    // GPUs in the same family produce identical tuning solutions when they
-    // share the same ISA, so we collapse them to avoid redundant cache entries.
-    //
-    // This table is maintained manually. Add new entries as new GPUs ship.
-    // Tom (Jun 17 meeting): "We have 11.0x for all Navi 31/32/33, then 11.5x
-    // for RDNA 3.5... we should be nuanced about the GFX architecture."
-    //
-    // Format: {variant} -> {canonical}
-    // Only add mappings where the ISA is confirmed identical.
+    // GPUs sharing the same ISA produce identical tuning solutions, so we
+    // collapse them to avoid redundant cache entries. Maintained manually;
+    // only add mappings where the ISA is confirmed identical.
     static const std::unordered_map<std::string, std::string> aliases = {
         // RDNA 3 family (gfx110x)
         {"gfx1031", "gfx1030"}, // Navi 22 -> Navi 21

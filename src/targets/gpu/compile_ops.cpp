@@ -338,9 +338,8 @@ struct compile_plan
         if(config.has_value())
         {
             const auto& problem = config->problem;
-            // Multi-cache priority search: check all caches in order (read-only
-            // first, then writable). First hit wins. This implements Tom's
-            // requirement: "search in order: first one, second one, third one."
+            // Multi-cache priority search: read-only caches first, then the
+            // writable cache; first hit wins.
             if(auto sol = ctx->find_in_problem_caches(preop.name(), problem))
             {
                 const auto& solution = sol.value();
