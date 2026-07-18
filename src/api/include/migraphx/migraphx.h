@@ -603,6 +603,9 @@ MIGRAPHX_C_EXPORT migraphx_status migraphx_compile_options_set_exhaustive_tune_f
 MIGRAPHX_C_EXPORT migraphx_status migraphx_compile_options_set_advance_backend_options(
     migraphx_compile_options_t compile_options, const char* options_json, ...);
 
+MIGRAPHX_C_EXPORT migraphx_status migraphx_compile_options_set_problem_cache_paths(
+    migraphx_compile_options_t compile_options, const char** paths, size_t paths_size);
+
 MIGRAPHX_C_EXPORT migraphx_status migraphx_parse_onnx(migraphx_program_t* out,
                                                       const char* name,
                                                       migraphx_onnx_options_t options);

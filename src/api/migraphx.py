@@ -439,6 +439,9 @@ def compile_options(h):
     h.method('set_advance_backend_options',
              api.params(options_json='const char*', vlist='...'),
              invoke='migraphx::set_backend_options($@)')
+    h.method('set_problem_cache_paths',
+             api.params(paths='std::vector<const char*>'),
+             invoke='migraphx::set_problem_cache_paths($@)')
 
 
 api.add_function('migraphx_parse_onnx',
