@@ -188,7 +188,7 @@ struct problem_cache_backend
               typename = typename std::enable_if<
                   not std::is_same<private_te_pure<PrivateDetailTypeErasedT>,
                                    problem_cache_backend>{}>::type>
-    problem_cache_backend& operator=(PrivateDetailTypeErasedT&& value)
+    problem_cache_backend& operator=(PrivateDetailTypeErasedT && value)
     {
         using std::swap;
         auto* derived = this->any_cast<private_te_pure<PrivateDetailTypeErasedT>>();
