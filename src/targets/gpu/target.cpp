@@ -276,7 +276,13 @@ std::vector<pass> target::get_passes(migraphx::context& gctx, const compile_opti
 {
     auto& ctx = any_cast<context>(gctx);
     ctx.set_exhaustive_tune_flag(options.exhaustive_tune);
-    ctx.load_problem_cache(); // TODO: update load_problem_cache to include gpu arch
+
+    // Multi-cache priority list: if problem_cache_paths is populated, use it.
+    // Otherwise fall back to the single problem_cache_path for backward compat.
+    if(not options.problem_cache_paths.empty())
+        ctx.load_problem_caches(options.problem_cache_paths);
+    else
+        ctx.load_problem_cache(options.problem_cache_path);
 
     pipeline_factory p{&gctx, options, from_value<backend_options>(value(options.backend_options))};
 

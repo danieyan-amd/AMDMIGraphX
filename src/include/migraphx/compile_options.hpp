@@ -29,6 +29,7 @@
 #include <migraphx/value.hpp>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
@@ -49,6 +50,16 @@ struct compile_options
      * configure compilation in a way that is opaque to the core engine.
      */
     std::unordered_map<std::string, value> backend_options;
+
+    /**
+     * Problem cache file paths, searched in priority order (first hit wins);
+     * new solutions are written to the last (writable) path. Empty falls back
+     * to the MIGRAPHX_PROBLEM_CACHE environment variable.
+     */
+    std::vector<std::string> problem_cache_paths;
+
+    /// Convenience single path; sets problem_cache_paths to one element.
+    std::string problem_cache_path;
 
     tracer trace{};
 };

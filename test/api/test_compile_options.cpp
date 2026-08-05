@@ -59,6 +59,17 @@ TEST_CASE(compile_options_flags)
     run_and_check(p, s);
 }
 
+TEST_CASE(compile_options_problem_cache_paths)
+{
+    migraphx::shape s{migraphx_shape_float_type, {3, 3}};
+    auto p = create_add_program(s);
+
+    migraphx::compile_options options;
+    options.set_problem_cache_paths({"priority_cache.json", "shipped_cache.json"});
+    p.compile(migraphx::target("ref"), options);
+    run_and_check(p, s);
+}
+
 TEST_CASE(compile_options_backend_option_scalar)
 {
     migraphx::shape s{migraphx_shape_float_type, {3, 3}};

@@ -223,6 +223,7 @@ add_library(migraphx_gpu
     hipblaslt.cpp
     hip_gemm_impl.cpp
     hsa_chiplet.cpp
+    json_problem_cache.cpp
     kernel.cpp
     lower_device_ops.cpp
     lowering.cpp
@@ -237,9 +238,11 @@ add_library(migraphx_gpu
     prepare_reduce.cpp
     pooling.cpp
     problem_cache.cpp
+    problem_cache_aggregator.cpp
     propagate_reshape_layout.cpp
     rocblas.cpp
     schedule_model.cpp
+    sqlite_problem_cache.cpp
     sync_device.cpp
     target.cpp
     time_op.cpp

@@ -97,6 +97,8 @@ struct MIGRAPHX_GPU_EXPORT problem_cache
 {
     // Build and store this cache's device key from the owning context.
     void set_device_key(const context& ctx);
+    // Directly set the device key (used by tests and multi-cache setup).
+    void set_device_key(const cache_device_key& key);
     const cache_device_key& get_device_key() const;
 
     bool has(const std::string& name, const value& problem) const;
@@ -104,6 +106,10 @@ struct MIGRAPHX_GPU_EXPORT problem_cache
     void mark(const std::string& name, const value& problem);
     optional<value> get(const std::string& name, const value& problem) const;
     void load();
+    /// Load from an explicit path, bypassing the MIGRAPHX_PROBLEM_CACHE
+    /// environment variable. An empty path is treated as "no cache"
+    /// (no-op). The path is remembered for the next save().
+    void load(const std::string& path);
     void save() const;
     // One {name, problem} -> solution map per device, so a single file can
     // hold solutions for many GPUs without collisions.
@@ -113,6 +119,12 @@ struct MIGRAPHX_GPU_EXPORT problem_cache
     // Device these entries were tuned on; set by the owning context. Empty
     // key = unidentified device, entries land in a single bucket.
     cache_device_key device_key{};
+
+    // Optional path override set by load(path). When non-empty, save() and
+    // any subsequent load() use this path instead of the MIGRAPHX_PROBLEM_-
+    // CACHE environment variable. Empty preserves the legacy env-var-driven
+    // default for callers that use the no-arg load().
+    std::string path_override{};
 };
 
 } // namespace gpu

@@ -198,6 +198,13 @@ static void set_backend_options(compile_options& options, const char* options_js
     set_backend_options(options, parse_json_options(options_json, vlist));
 }
 
+// Set the ordered list of problem cache file paths, searched in priority order
+// during compilation (see compile_options::problem_cache_paths).
+static void set_problem_cache_paths(compile_options& options, std::vector<const char*> paths)
+{
+    options.problem_cache_paths = std::vector<std::string>(paths.begin(), paths.end());
+}
+
 static void set_file_format(file_options& options, const char* format) { options.format = format; }
 
 static void set_default_dim_value(onnx_options& options, size_t value)
@@ -2284,6 +2291,21 @@ extern "C" migraphx_status migraphx_compile_options_set_advance_backend_options(
         migraphx::set_backend_options((compile_options->object), (options_json), (vlist));
     });
     va_end(vlist);
+    return api_error_result;
+}
+
+extern "C" migraphx_status migraphx_compile_options_set_problem_cache_paths(
+    migraphx_compile_options_t compile_options, const char** paths, size_t paths_size)
+{
+    auto api_error_result = migraphx::try_([&] {
+        if(compile_options == nullptr)
+            MIGRAPHX_THROW(migraphx_status_bad_param,
+                           "Bad parameter compile_options: Null pointer");
+        if(paths == nullptr and paths_size != 0)
+            MIGRAPHX_THROW(migraphx_status_bad_param, "Bad parameter paths: Null pointer");
+        migraphx::set_problem_cache_paths((compile_options->object),
+                                          (std::vector<const char*>(paths, paths + paths_size)));
+    });
     return api_error_result;
 }
 

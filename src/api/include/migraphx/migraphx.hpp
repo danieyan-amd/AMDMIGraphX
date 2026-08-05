@@ -1221,6 +1221,16 @@ struct compile_options : MIGRAPHX_HANDLE_BASE(compile_options)
              xs...);
     }
 
+    /// Set the ordered list of problem cache file paths, searched in priority
+    /// order during compilation (first hit wins).
+    void set_problem_cache_paths(std::vector<const char*> paths)
+    {
+        call(&migraphx_compile_options_set_problem_cache_paths,
+             this->get_handle_ptr(),
+             paths.data(),
+             paths.size());
+    }
+
     /// Set a single backend option, lexically converting the value to a string.
     template <class T>
     void set_advance_backend_option(const std::string& name, T x)

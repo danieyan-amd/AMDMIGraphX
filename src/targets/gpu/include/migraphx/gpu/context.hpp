@@ -37,6 +37,7 @@
 #include <migraphx/gpu/hip.hpp>
 #include <migraphx/env.hpp>
 #include <migraphx/config.hpp>
+#include <migraphx/logger.hpp>
 #include <migraphx/gpu/device_name.hpp>
 #include <migraphx/gpu/problem_cache.hpp>
 #include <migraphx/gpu/hsa_chiplet.hpp>
@@ -300,8 +301,22 @@ struct context
         auto_save_problem_cache& operator=(const auto_save_problem_cache&) = delete;
         virtual ~auto_save_problem_cache()
         {
-            if(auto_save)
+            if(not auto_save)
+                return;
+            // The destructor is implicitly noexcept, so a save() failure (disk
+            // full, permissions) must be swallowed here or it would terminate.
+            try
+            {
                 this->save();
+            }
+            catch(const std::exception& e)
+            {
+                log::warn() << "auto_save_problem_cache: save failed: " << e.what();
+            }
+            catch(...)
+            {
+                log::warn() << "auto_save_problem_cache: save failed: unknown error";
+            }
         }
     };
     context(std::size_t device_id = 0, std::size_t n = value_of(MIGRAPHX_NSTREAMS{}, 1))
@@ -488,11 +503,96 @@ struct context
     }
 
     problem_cache& get_problem_cache() { return *pc; }
+
+    /// Load a single cache (backward compatible). Used when only one path
+    /// is provided or when falling back to the MIGRAPHX_PROBLEM_CACHE env var.
     void load_problem_cache()
     {
         pc->load();
         pc->auto_save = true;
     }
+    /// Load from an explicit path, bypassing MIGRAPHX_PROBLEM_CACHE. An
+    /// empty string falls back to env-var-driven behaviour (matches the
+    /// no-arg overload). Used by compile_options.problem_cache_path.
+    void load_problem_cache(const std::string& path)
+    {
+        if(path.empty())
+            pc->load();
+        else
+            pc->load(path);
+        pc->auto_save = true;
+    }
+
+    /// Load caches in priority order (first hit wins); new entries are written
+    /// to the last (writable) cache.
+    void load_problem_caches(const std::vector<std::string>& paths)
+    {
+        if(paths.empty())
+        {
+            load_problem_cache();
+            return;
+        }
+        if(paths.size() == 1)
+        {
+            load_problem_cache(paths.front());
+            return;
+        }
+        // A cache list is a read-only priority list: search the caches in the
+        // given order and return the first hit (highest priority first, e.g.
+        // application-provided, then shipped). Shipped caches are immutable, so
+        // none of the listed caches are written to; persisting newly tuned
+        // solutions to a writable local cache is a separate future item.
+        read_only_caches.clear();
+        for(const auto& path : paths)
+        {
+            auto ro = std::make_shared<problem_cache>();
+            ro->set_device_key(*this);
+            if(not path.empty())
+                ro->load(path);
+            read_only_caches.push_back(std::move(ro));
+        }
+        pc->auto_save = false;
+    }
+
+    /// Search all caches in priority order (read-only first, then writable).
+    /// Returns the first hit. This is what compile_ops should call.
+    optional<value> find_in_problem_caches(const std::string& name, const value& problem) const
+    {
+        // Search read-only caches first (highest priority)
+        for(const auto& ro : read_only_caches)
+        {
+            if(auto sol = ro->get(name, problem))
+                return sol;
+        }
+        // Then check the writable cache
+        return pc->get(name, problem);
+    }
+
+    /// Check if any cache has an entry for this problem.
+    bool problem_cache_has(const std::string& name, const value& problem) const
+    {
+        for(const auto& ro : read_only_caches)
+        {
+            if(ro->has(name, problem))
+                return true;
+        }
+        return pc->has(name, problem);
+    }
+
+    /// Insert into the writable cache only (new tuning solutions go here).
+    void problem_cache_insert(const std::string& name, const value& problem, const value& solution)
+    {
+        pc->insert(name, problem, solution);
+    }
+
+    /// Mark a problem as seen in the writable cache.
+    void problem_cache_mark(const std::string& name, const value& problem)
+    {
+        pc->mark(name, problem);
+    }
+
+    /// Save the writable cache (called explicitly or via auto_save on destruction).
+    void save_problem_cache() const { pc->save(); }
 
     private:
     // TODO: Make this a vector to support multiple devices
@@ -507,6 +607,9 @@ struct context
     shared<hip_event_ptr> begin_event           = nullptr;
     shared<hip_event_ptr> finish_event          = nullptr;
     std::shared_ptr<auto_save_problem_cache> pc = nullptr;
+    // Read-only caches searched before pc (priority order, highest first).
+    // These are populated by load_problem_caches() when multiple paths are provided.
+    std::vector<std::shared_ptr<problem_cache>> read_only_caches;
 };
 
 inline void migraphx_to_value(value& v, const context& ctx) { v = ctx.to_value(); }
